@@ -8,3 +8,7 @@
 - 서버 코드 수정 후: `python3 edge/build.py` → `edge/dist/ml-api/index.ts`를 다시 배포(verify_jwt 끔)
 - 화면 코드 수정 시 `public/`을 고친 뒤 `docs/`로 복사(단, `docs/config.js`는 유지)
 - 내 PC에서 쓰는 방식(`start-windows.bat`)은 `public/config.js`가 비어 있어 그대로 동작
+
+## 세계관 연결
+'포스터방 탈출(안녕의 방)' 제1막과 같은 은색 금속 시설·카테고리 A·`- A.N. -` 서명을 쓰는 제2막 '문장 제작실'입니다.
+분류하던 활동 → 조건에 맞는 문장 제작 → 공익광고 포스터 프롬프트·패들렛 전시로 이어집니다.

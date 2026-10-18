@@ -99,7 +99,7 @@
 
   function renderShell() {
     const top = h('div', { class: 'top' },
-      h('div', { class: 'brand' }, '문장 연습실', h('small', null, '교사 화면')),
+      h('div', { class: 'brand' }, h('span', { class: 'stampbox sm' }, '제2막'), '문장 연습실', h('small', null, '안녕(安寧)의 방 · 교사 화면')),
       h('button', { class: 'btn sm', type: 'button', onclick: logout }, '로그아웃'));
     const tabs = h('div', { class: 'tabs', role: 'tablist' });
     for (const [id, name] of TABS) {

@@ -71,9 +71,9 @@
     const sid = h('input', { type: 'text', id: 'sid', inputmode: 'numeric', autocomplete: 'off', placeholder: '예: 20312', required: true });
     const name = h('input', { type: 'text', id: 'name', autocomplete: 'off', placeholder: '예: 김하늘', required: true });
     const btn = h('button', { class: 'btn primary', type: 'submit' }, '입장하기');
-    const form = h('form', { class: 'login card', novalidate: true },
-      h('div', null, h('p', { class: 'eyebrow' }, '고등학교 국어'), h('h1', null, '문장 연습실')),
-      h('p', { class: 'muted' }, '학번과 이름을 입력하면 들어갈 수 있어요.'),
+    const form = h('form', { class: 'gate-panel', novalidate: true },
+      h('div', null, h('p', { class: 'eyebrow' }, 'ENTRY REGISTRATION'), h('h2', null, '입실 등록')),
+      h('p', { class: 'muted' }, '학번과 이름을 입력하면 제작실 문이 열려요.'),
       S.notice ? h('div', { class: 'notice warn' }, S.notice) : null,
       h('div', { class: 'row' },
         h('label', { class: 'field', for: 'sid' }, '학번', sid),
@@ -92,7 +92,23 @@
         err.textContent = e.message; err.hidden = false; btn.disabled = false;
       }
     });
-    app.replaceChildren(h('div', { class: 'login-wrap' }, form));
+    document.body.classList.add('is-gate'); app.classList.add('gatewrap');
+    app.replaceChildren(h('div', { class: 'gate' },
+      h('div', { class: 'gate-ceiling', 'aria-hidden': 'true' }),
+      h('div', { class: 'gate-frame' },
+        h('header', { class: 'gate-lintel' }, h('span', { class: 'gate-mark' }, 'A'),
+          h('span', { class: 'gate-owner' }, 'CATEGORY A', h('i', null, '/'), '안녕(安寧)의 방 · 제2막'),
+          h('span', { class: 'gate-led' }, h('i', { class: 'dot on' }), '제작실 개방')),
+        h('div', { class: 'gate-doors' },
+          h('section', { class: 'gate-leaf left' },
+            h('p', { class: 'eyebrow' }, '문장 연습실 · 문장 제작실'),
+            h('h1', null, '분류만 하던 너희가', h('br'), '이제 문장을 만든다'),
+            h('div', { class: 'gate-copy' },
+              h('p', null, '포스터방에서는 카테고리 A가 내놓은 문장을 ', h('b', null, '해부하고 분류'), '했다.'),
+              h('p', null, '이곳에서는 거꾸로, 주어진 ', h('b', null, '문법 조건'), '에 맞는 문장을 ', h('b', null, '직접 제작'), '한다. 완성한 문장은 공익광고의 카피가 된다.')),
+            h('p', { class: 'gate-order' }, '조건을 읽고, 문장을 짓고, 포스터로 내보내라.', h('br'), '이 방이 다시 안녕해질 때까지.'),
+            h('p', { class: 'sig' }, '- A.N. -')),
+          h('section', { class: 'gate-leaf right' }, form)))));
     sid.focus();
   }
 
@@ -416,7 +432,8 @@
       : r.verdict === 'incorrect' ? (r.manual ? `선생님 피드백을 읽고 다시 써서 제출해 보세요. (${r.attempt}번째 도전)` : `고칠 부분을 확인하고 다시 제출해 보세요. (${r.attempt}번째 도전)`) : r.message;
     const wheres = r.checks ? Object.values(r.checks).filter((c) => !c.ok).map((c) => c.where) : [];
     const card = h('section', { class: 'card result ' + cls, tabindex: '-1', id: 'result' },
-      h('div', { class: 'verdict' }, title),
+      h('div', { class: 'verdict-row' }, h('div', { class: 'verdict' }, title),
+        h('span', { class: 'stampbox sm' + (r.verdict === 'correct' ? ' free' : '') }, r.verdict === 'correct' ? '승인' : r.verdict === 'incorrect' ? '반려' : '검토 중')),
       h('div', { class: 'sub' }, sub),
       sentenceView(r.sentence || '', wheres));
 
@@ -535,19 +552,19 @@
 
     const st = S.student;
     const top = h('div', { class: 'top' },
-      h('div', { class: 'brand' }, '문장 연습실', h('small', null, `누적 ${S.stats.correct}/${S.stats.tries}`)),
+      h('div', { class: 'brand' }, h('span', { class: 'stampbox sm' }, '제2막'), '문장 연습실', h('small', null, `안녕(安寧)의 방 · 누적 ${S.stats.correct}/${S.stats.tries}`)),
       h('div', { class: 'chip' }, `${st.cls} ${st.name}`, h('button', { class: 'btn sm', type: 'button', onclick: () => logout(false) }, '나가기')));
 
     const nodes = [top];
     if (S.notice) nodes.push(h('div', { class: 'notice bad', role: 'alert' }, S.notice));
     if (c) {
       nodes.push(h('section', { class: 'card' },
-        h('h2', null, '이번 조건'),
+        h('h2', null, '이번 제작 조건'),
         h('div', { class: 'conds' },
           condRow('문장 성분', c.conditions.comp),
           condRow('문장의 짜임', c.conditions.struct),
           topicRow(c)),
-        h('p', { class: 'muted small', style: 'margin-top:12px' }, '세 조건을 모두 만족하는 문장 한 개를 써서 제출하세요.')));
+        h('p', { class: 'muted small', style: 'margin-top:12px' }, '세 조건을 모두 만족하는 문장 한 개를 써서 제출하세요.'), h('p', { class: 'sig', style: 'text-align:right;margin-top:6px' }, '- A.N. -')));
       nodes.push(h('section', { class: 'card' },
         h('h2', null, '내 문장'), pad,
         h('div', { class: 'compose-foot' }, count, btn)));
@@ -571,6 +588,7 @@
 
   function render() {
     if (!S.token || !S.student) return renderLogin();
+    document.body.classList.remove('is-gate'); app.classList.remove('gatewrap');
     renderMain();
   }
 
