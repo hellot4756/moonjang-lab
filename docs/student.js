@@ -73,7 +73,7 @@
     const btn = h('button', { class: 'btn primary', type: 'submit' }, '입장하기');
     const form = h('form', { class: 'gate-panel', novalidate: true },
       h('div', null, h('p', { class: 'eyebrow' }, 'ENTRY REGISTRATION'), h('h2', null, '입실 등록')),
-      h('p', { class: 'muted' }, '학번과 이름을 입력하면 제작실 문이 열려요.'),
+      h('p', { class: 'muted' }, '학번과 이름을 입력하면 수업이 시작돼요.'),
       S.notice ? h('div', { class: 'notice warn' }, S.notice) : null,
       h('div', { class: 'row' },
         h('label', { class: 'field', for: 'sid' }, '학번', sid),
@@ -98,14 +98,14 @@
       h('div', { class: 'gate-frame' },
         h('header', { class: 'gate-lintel' }, h('span', { class: 'gate-mark' }, 'A'),
           h('span', { class: 'gate-owner' }, 'CATEGORY A', h('i', null, '/'), '안녕(安寧)의 방 · 제2막'),
-          h('span', { class: 'gate-led' }, h('i', { class: 'dot on' }), '제작실 개방')),
+          h('span', { class: 'gate-led' }, h('i', { class: 'dot on' }), '수업 개시')),
         h('div', { class: 'gate-doors' },
           h('section', { class: 'gate-leaf left' },
-            h('p', { class: 'eyebrow' }, '문장 연습실 · 문장 제작실'),
-            h('h1', null, '분류만 하던 너희가', h('br'), '이제 문장을 만든다'),
+            h('p', { class: 'eyebrow' }, '제2막 · 후계자 수업'),
+            h('h1', null, '탈출인 줄 알았는데', h('br'), '후계자 수업이었다'),
             h('div', { class: 'gate-copy' },
-              h('p', null, '포스터방에서는 카테고리 A가 내놓은 문장을 ', h('b', null, '해부하고 분류'), '했다.'),
-              h('p', null, '이곳에서는 거꾸로, 주어진 ', h('b', null, '문법 조건'), '에 맞는 문장을 ', h('b', null, '직접 제작'), '한다. 완성한 문장은 공익광고의 카피가 된다.')),
+              h('p', null, '포스터방에서 문장을 ', h('b', null, '해부하고 분류'), '해 낸 너희를, 문법광인이 눈여겨보았다.'),
+              h('p', null, '이제 거꾸로, 주어진 ', h('b', null, '문법 조건'), '에 맞는 문장을 ', h('b', null, '직접 제작'), '한다. 완성한 문장은 공익광고의 카피가 된다.')),
             h('p', { class: 'gate-order' }, '조건을 읽고, 문장을 짓고, 포스터로 내보내라.', h('br'), '이 방이 다시 안녕해질 때까지.'),
             h('p', { class: 'sig' }, '- A.N. -')),
           h('section', { class: 'gate-leaf right' }, form)))));
@@ -433,7 +433,7 @@
     const wheres = r.checks ? Object.values(r.checks).filter((c) => !c.ok).map((c) => c.where) : [];
     const card = h('section', { class: 'card result ' + cls, tabindex: '-1', id: 'result' },
       h('div', { class: 'verdict-row' }, h('div', { class: 'verdict' }, title),
-        h('span', { class: 'stampbox sm' + (r.verdict === 'correct' ? ' free' : '') }, r.verdict === 'correct' ? '승인' : r.verdict === 'incorrect' ? '반려' : '검토 중')),
+        h('span', { class: 'stampbox sm' + (r.verdict === 'correct' ? ' free' : '') }, r.verdict === 'correct' ? '통과' : r.verdict === 'incorrect' ? '재수련' : '스승 확인')),
       h('div', { class: 'sub' }, sub),
       sentenceView(r.sentence || '', wheres));
 
