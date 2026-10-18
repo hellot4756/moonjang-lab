@@ -955,28 +955,46 @@
         pstat,
         h('div', { class: 'toolbar' }, psave, ptest, pclear), pmsg));
 
-    const key = h('input', { type: 'password', id: 'key', autocomplete: 'off', placeholder: info.ai.configured ? info.ai.keyHint + ' (바꾸려면 새 키 입력)' : 'sk-ant-...' });
-    const model = h('input', { type: 'text', id: 'model', placeholder: '비워 두면 기본 모델 (' + info.ai.model + ')' });
+    const ai = info.ai;
+    const prov = h('select', { id: 'prov' }, h('option', { value: 'claude' }, 'Claude (Anthropic)'), h('option', { value: 'gemini' }, 'Gemini (Google)'));
+    prov.value = ai.provider || 'claude';
+    const key = h('input', { type: 'password', id: 'key', autocomplete: 'off', placeholder: ai.claude.configured ? ai.claude.keyHint + ' (바꾸려면 새 키 입력)' : 'sk-ant-...' });
+    const model = h('input', { type: 'text', id: 'model', placeholder: '비워 두면 기본 모델 (' + ai.claude.model + ')' });
     model.value = info.settings.model || '';
+    const gkey = h('input', { type: 'password', id: 'gkey', autocomplete: 'off', placeholder: ai.gemini.configured ? ai.gemini.keyHint + ' (바꾸려면 새 키 입력)' : 'AIza...' });
+    const gmodel = h('input', { type: 'text', id: 'gmodel', placeholder: '비워 두면 기본 모델 (' + ai.gemini.model + ')' });
+    gmodel.value = info.settings.geminiModel || '';
     const aiMsg = h('div', { hidden: true });
     const showMsg = (t, cls) => { aiMsg.className = 'notice ' + cls; aiMsg.textContent = t; aiMsg.hidden = false; };
+    const claudeBox = h('div', { class: 'wrap', style: 'max-width:520px' },
+      h('p', null, h('span', { class: 'pill ' + (ai.claude.configured ? 'ok' : 'warn') }, ai.claude.configured ? 'Claude 키 저장됨' : 'Claude 키 없음'), ' ', ai.claude.configured ? h('span', { class: 'muted small' }, ai.claude.keyHint) : null),
+      h('label', { class: 'field', for: 'key' }, 'Claude API 키 (Claude Console에서 발급)', key),
+      h('label', { class: 'field', for: 'model' }, '모델 이름 (고급)', model));
+    const geminiBox = h('div', { class: 'wrap', style: 'max-width:520px' },
+      h('p', null, h('span', { class: 'pill ' + (ai.gemini.configured ? 'ok' : 'warn') }, ai.gemini.configured ? 'Gemini 키 저장됨' : 'Gemini 키 없음'), ' ', ai.gemini.configured ? h('span', { class: 'muted small' }, ai.gemini.keyHint) : null),
+      h('label', { class: 'field', for: 'gkey' }, 'Gemini API 키 (Google AI Studio에서 발급)', gkey),
+      h('label', { class: 'field', for: 'gmodel' }, '모델 이름 (고급)', gmodel),
+      h('p', { class: 'muted small' }, '무료 이용 한도의 Gemini API는 입력 내용이 Google 서비스 개선에 쓰일 수 있어요. 학생 이름과 학번은 보내지 않고 조건과 문장만 보내요.'));
+    const sync = () => { claudeBox.hidden = prov.value !== 'claude'; geminiBox.hidden = prov.value !== 'gemini'; };
+    prov.addEventListener('change', sync); sync();
     const saveKey = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
       try {
-        const body2 = { model: model.value };
+        const body2 = { provider: prov.value, model: model.value, geminiModel: gmodel.value };
         if (key.value.trim()) body2.apiKey = key.value;
-        T.info = await api('/api/teacher/settings', body2, 'PUT'); key.value = ''; showMsg('저장했어요. [연결 시험]으로 확인해 보세요.', 'ok'); renderShell();
+        if (gkey.value.trim()) body2.geminiKey = gkey.value;
+        T.info = await api('/api/teacher/settings', body2, 'PUT'); key.value = ''; gkey.value = ''; showMsg('저장했어요. [연결 시험]으로 확인해 보세요.', 'ok'); renderShell();
       } catch (e) { showMsg(e.message, 'bad'); }
     } }, '저장');
     const ping = h('button', { class: 'btn', type: 'button', onclick: async () => {
-      showMsg('연결을 시험하는 중이에요…', 'info');
+      showMsg('연결을 시험하는 중이에요… (저장한 AI로 시험해요)', 'info');
       try { const o = await api('/api/teacher/ping', {}); showMsg(o.ok ? '연결에 성공했어요.' : o.message, o.ok ? 'ok' : 'bad'); } catch (e) { showMsg(e.message, 'bad'); }
     } }, '연결 시험');
     const aiCard = h('section', { class: 'card' }, h('h2', null, 'AI 판정 연결'),
-      h('p', { class: 'muted small', style: 'margin-bottom:12px' }, 'Claude Console에서 발급한 API 키를 입력해요. 학생의 이름과 학번은 AI에 보내지 않고, 조건과 문장만 보내요. 키는 이 컴퓨터의 data 폴더에만 저장돼요.'),
+      h('p', { class: 'muted small', style: 'margin-bottom:12px' }, '문장 판정에 쓸 AI를 고르고 API 키를 입력해요. 학생의 이름과 학번은 AI에 보내지 않고, 조건과 문장만 보내요. 키는 저장해 둔 서버에만 보관돼요. AI를 바꾸면 이미 판정한 기록은 그대로 남아요.'),
       h('div', { class: 'wrap', style: 'max-width:520px' },
-        h('p', null, h('span', { class: 'pill ' + (info.ai.configured ? 'ok' : 'warn') }, info.ai.configured ? '연결 설정됨' : '키가 필요해요'), ' ', info.ai.configured ? h('span', { class: 'muted small' }, info.ai.keyHint) : null),
-        h('label', { class: 'field', for: 'key' }, 'API 키', key),
-        h('label', { class: 'field', for: 'model' }, '모델 이름 (고급)', model),
+        h('label', { class: 'field', for: 'prov' }, '판정에 쓸 AI', prov),
+        h('p', null, h('span', { class: 'pill ' + (ai.configured ? 'ok' : 'warn') }, ai.configured ? '지금 연결: ' + (ai.provider === 'gemini' ? 'Gemini' : 'Claude') : '선택한 AI의 키가 필요해요'), ' ', ai.configured ? h('span', { class: 'muted small' }, ai.model) : null),
+        claudeBox, geminiBox,
         h('div', { class: 'toolbar' }, saveKey, ping), aiMsg));
 
     // 판정 시험

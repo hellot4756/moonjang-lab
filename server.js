@@ -49,14 +49,25 @@ const PORT = parseInt(process.env.PORT, 10) || 3000;
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(ROOT, 'data');
 const TEACHER_PASSWORD = process.env.TEACHER_PASSWORD || '';
 const DEFAULT_MODEL = 'claude-sonnet-5-5';
+const DEFAULT_GEMINI = 'gemini-2.5-flash';
 
 const store = new Store(DATA_DIR);
 C.init(path.join(DATA_DIR, 'conditions.json'));
-const grader = new Grader(() => ({
-  apiKey: store.settings.apiKey || process.env.ANTHROPIC_API_KEY || '',
-  model: store.settings.model || process.env.ANTHROPIC_MODEL || DEFAULT_MODEL,
-  baseUrl: process.env.ANTHROPIC_BASE_URL || '',
-}));
+function aiConfig() {
+  const gem = store.settings.provider === 'gemini';
+  return gem ? {
+    provider: 'gemini',
+    apiKey: store.settings.geminiApiKey || process.env.GEMINI_API_KEY || '',
+    model: store.settings.geminiModel || process.env.GEMINI_MODEL || DEFAULT_GEMINI,
+    baseUrl: process.env.GEMINI_BASE_URL || '',
+  } : {
+    provider: 'claude',
+    apiKey: store.settings.apiKey || process.env.ANTHROPIC_API_KEY || '',
+    model: store.settings.model || process.env.ANTHROPIC_MODEL || DEFAULT_MODEL,
+    baseUrl: process.env.ANTHROPIC_BASE_URL || '',
+  };
+}
+const grader = new Grader(aiConfig);
 
 // ---------- 토큰 ----------
 const b64u = (buf) => Buffer.from(buf).toString('base64url');
@@ -270,21 +281,28 @@ function maskKey(k) {
 
 function teacherInfo() {
   const cfg = grader.getConfig();
-  const own = !!store.settings.apiKey;
+  const gem = cfg.provider === 'gemini';
+  const own = gem ? !!store.settings.geminiApiKey : !!store.settings.apiKey;
+  const cKey = store.settings.apiKey || process.env.ANTHROPIC_API_KEY || '';
+  const gKey = store.settings.geminiApiKey || process.env.GEMINI_API_KEY || '';
   return {
     urls: lanUrls(),
     port: PORT,
     ai: {
+      provider: cfg.provider,
       configured: !!cfg.apiKey,
       model: cfg.model,
       keyHint: maskKey(cfg.apiKey),
-      keySource: own ? 'settings' : (process.env.ANTHROPIC_API_KEY ? 'env' : ''),
+      keySource: own ? 'settings' : (gem ? (process.env.GEMINI_API_KEY ? 'env' : '') : (process.env.ANTHROPIC_API_KEY ? 'env' : '')),
+      claude: { configured: !!cKey, keyHint: maskKey(cKey), model: store.settings.model || process.env.ANTHROPIC_MODEL || DEFAULT_MODEL },
+      gemini: { configured: !!gKey, keyHint: maskKey(gKey), model: store.settings.geminiModel || process.env.GEMINI_MODEL || DEFAULT_GEMINI },
     },
     settings: {
       level: store.settings.level,
       open: store.settings.open,
       revealAfter: store.settings.revealAfter,
       model: store.settings.model,
+      geminiModel: store.settings.geminiModel || '',
       aiMode: store.settings.aiMode === 'off' ? 'off' : 'on',
       poster: store.settings.poster !== false,
       topicChoice: store.settings.topicChoice !== false,
@@ -541,6 +559,10 @@ async function handleApi(req, res, pathname, query) {
       if (typeof b.apiKey === 'string' && b.apiKey.trim()) patch.apiKey = b.apiKey;
       if (b.clearApiKey) patch.apiKey = '';
       if (typeof b.model === 'string') patch.model = b.model;
+      if (b.provider === 'claude' || b.provider === 'gemini') patch.provider = b.provider;
+      if (typeof b.geminiKey === 'string' && b.geminiKey.trim()) patch.geminiApiKey = b.geminiKey;
+      if (b.clearGeminiKey) patch.geminiApiKey = '';
+      if (typeof b.geminiModel === 'string') patch.geminiModel = b.geminiModel;
       store.updateSettings(patch);
       grader.cache.clear();
       return send(res, 200, teacherInfo());

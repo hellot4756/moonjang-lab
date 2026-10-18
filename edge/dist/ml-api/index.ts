@@ -286,6 +286,9 @@ const DEFAULT_SETTINGS = {
   aiMode: 'on',          // 'on' = AI가 문법 판정 | 'off' = AI 없이 선생님이 직접 판정
   apiKey: '',
   model: '',
+  provider: 'claude',    // 'claude' | 'gemini' (문장 판정에 쓸 AI)
+  geminiApiKey: '',
+  geminiModel: '',
 };
 function normName(s) {
   return String(s || '').normalize('NFC').replace(/\s+/g, '');
@@ -392,6 +395,9 @@ class Store {
     if (typeof patch.padletTemplate === 'string') s.padletTemplate = patch.padletTemplate.replace(/\r/g, '').slice(0, 1000);
     if (typeof patch.apiKey === 'string') s.apiKey = patch.apiKey.trim();
     if (typeof patch.model === 'string') s.model = patch.model.trim();
+    if (patch.provider === 'claude' || patch.provider === 'gemini') s.provider = patch.provider;
+    if (typeof patch.geminiApiKey === 'string') s.geminiApiKey = patch.geminiApiKey.trim().slice(0, 300);
+    if (typeof patch.geminiModel === 'string') s.geminiModel = patch.geminiModel.trim().slice(0, 80);
     this.writeJson(this.settingsFile, s);
     return s;
   }
@@ -649,7 +655,11 @@ class Grader {
   }
   async callApi(system, userMsg, maxTokens) {
     const cfg = this.getConfig();
-    const url = (cfg.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '') + '/v1/messages';
+    const gem = cfg.provider === 'gemini';
+    const url = gem
+      ? (cfg.baseUrl || 'https://generativelanguage.googleapis.com').replace(/\/+$/, '') + '/v1beta/models/' + encodeURIComponent(cfg.model) + ':generateContent'
+      : (cfg.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '') + '/v1/messages';
+    const who = gem ? 'Gemini' : 'Claude';
     const delays = [0, 1500, 4000];
     let lastErr = null;
     for (let i = 0; i < delays.length; i++) {
@@ -660,28 +670,34 @@ class Grader {
         const res = await fetch(url, {
           method: 'POST',
           signal: ctl.signal,
-          headers: {
-            'content-type': 'application/json',
-            'x-api-key': cfg.apiKey,
-            'anthropic-version': '2023-06-01',
-          },
-          body: JSON.stringify({
-            model: cfg.model,
-            max_tokens: maxTokens,
-            system,
-            messages: [{ role: 'user', content: userMsg }],
-          }),
+          headers: gem
+            ? { 'content-type': 'application/json', 'x-goog-api-key': cfg.apiKey }
+            : { 'content-type': 'application/json', 'x-api-key': cfg.apiKey, 'anthropic-version': '2023-06-01' },
+          body: JSON.stringify(gem
+            ? {
+              systemInstruction: { parts: [{ text: system }] },
+              contents: [{ role: 'user', parts: [{ text: userMsg }] }],
+              generationConfig: { maxOutputTokens: Math.max(maxTokens * 4, 2000), temperature: 0.2 },
+            }
+            : { model: cfg.model, max_tokens: maxTokens, system, messages: [{ role: 'user', content: userMsg }] }),
         });
         const bodyText = await res.text();
         if (res.ok) {
           const data = JSON.parse(bodyText);
+          if (gem) {
+            const cand = (data.candidates || [])[0];
+            const text = cand && cand.content && cand.content.parts ? cand.content.parts.map((x) => x.text || '').join('') : '';
+            if (!text) { lastErr = { status: 200, message: data.promptFeedback && data.promptFeedback.blockReason ? '차단됨: ' + data.promptFeedback.blockReason : '빈 응답' }; continue; }
+            return { ok: true, text };
+          }
           const block = (data.content || []).find((b) => b.type === 'text');
           return { ok: true, text: block ? block.text : '' };
         }
         let msg = '';
-        try { msg = JSON.parse(bodyText).error.message; } catch (e) { msg = bodyText.slice(0, 200); }
+        try { const j = JSON.parse(bodyText); msg = (j.error && j.error.message) || ''; } catch (e) { msg = bodyText.slice(0, 200); }
         lastErr = { status: res.status, message: msg };
-        if (res.status === 401 || res.status === 403) return { ok: false, code: 'auth', message: 'API 키가 올바르지 않거나 권한이 없어요.' };
+        const badKey = res.status === 401 || res.status === 403 || (gem && res.status === 400 && /api key/i.test(msg));
+        if (badKey) return { ok: false, code: 'auth', message: `${who} API 키가 올바르지 않거나 권한이 없어요.` };
         if (res.status === 404) return { ok: false, code: 'model', message: `모델 이름을 확인해 주세요. (${msg})` };
         if (res.status === 400) return { ok: false, code: 'request', message: `요청이 거절되었어요. (${msg})` };
       } catch (e) {
@@ -1220,13 +1236,24 @@ const C = require('./lib/conditions');
 const PORT = 0;
 const TEACHER_PASSWORD = process.env.TEACHER_PASSWORD || '';
 const DEFAULT_MODEL = 'claude-sonnet-5-5';
+const DEFAULT_GEMINI = 'gemini-2.5-flash';
 const store = new DbStore();
 C.setHook({ save: (st) => (st ? store.putKv('conditions', st) : store.delKv('conditions')) });
-const grader = new Grader(() => ({
-  apiKey: store.settings.apiKey || process.env.ANTHROPIC_API_KEY || '',
-  model: store.settings.model || process.env.ANTHROPIC_MODEL || DEFAULT_MODEL,
-  baseUrl: process.env.ANTHROPIC_BASE_URL || '',
-}));
+function aiConfig() {
+  const gem = store.settings.provider === 'gemini';
+  return gem ? {
+    provider: 'gemini',
+    apiKey: store.settings.geminiApiKey || process.env.GEMINI_API_KEY || '',
+    model: store.settings.geminiModel || process.env.GEMINI_MODEL || DEFAULT_GEMINI,
+    baseUrl: process.env.GEMINI_BASE_URL || '',
+  } : {
+    provider: 'claude',
+    apiKey: store.settings.apiKey || process.env.ANTHROPIC_API_KEY || '',
+    model: store.settings.model || process.env.ANTHROPIC_MODEL || DEFAULT_MODEL,
+    baseUrl: process.env.ANTHROPIC_BASE_URL || '',
+  };
+}
+const grader = new Grader(aiConfig);
 const b64u = (buf) => Buffer.from(buf).toString('base64url');
 function sign(payload) {
   const body = b64u(JSON.stringify(payload));
@@ -1392,21 +1419,28 @@ function maskKey(k) {
 }
 function teacherInfo() {
   const cfg = grader.getConfig();
-  const own = !!store.settings.apiKey;
+  const gem = cfg.provider === 'gemini';
+  const own = gem ? !!store.settings.geminiApiKey : !!store.settings.apiKey;
+  const cKey = store.settings.apiKey || process.env.ANTHROPIC_API_KEY || '';
+  const gKey = store.settings.geminiApiKey || process.env.GEMINI_API_KEY || '';
   return {
     urls: lanUrls(),
     port: PORT,
     ai: {
+      provider: cfg.provider,
       configured: !!cfg.apiKey,
       model: cfg.model,
       keyHint: maskKey(cfg.apiKey),
-      keySource: own ? 'settings' : (process.env.ANTHROPIC_API_KEY ? 'env' : ''),
+      keySource: own ? 'settings' : (gem ? (process.env.GEMINI_API_KEY ? 'env' : '') : (process.env.ANTHROPIC_API_KEY ? 'env' : '')),
+      claude: { configured: !!cKey, keyHint: maskKey(cKey), model: store.settings.model || process.env.ANTHROPIC_MODEL || DEFAULT_MODEL },
+      gemini: { configured: !!gKey, keyHint: maskKey(gKey), model: store.settings.geminiModel || process.env.GEMINI_MODEL || DEFAULT_GEMINI },
     },
     settings: {
       level: store.settings.level,
       open: store.settings.open,
       revealAfter: store.settings.revealAfter,
       model: store.settings.model,
+      geminiModel: store.settings.geminiModel || '',
       aiMode: store.settings.aiMode === 'off' ? 'off' : 'on',
       poster: store.settings.poster !== false,
       topicChoice: store.settings.topicChoice !== false,
@@ -1632,6 +1666,10 @@ async function handleApi(req, res, pathname, query) {
       if (typeof b.apiKey === 'string' && b.apiKey.trim()) patch.apiKey = b.apiKey;
       if (b.clearApiKey) patch.apiKey = '';
       if (typeof b.model === 'string') patch.model = b.model;
+      if (b.provider === 'claude' || b.provider === 'gemini') patch.provider = b.provider;
+      if (typeof b.geminiKey === 'string' && b.geminiKey.trim()) patch.geminiApiKey = b.geminiKey;
+      if (b.clearGeminiKey) patch.geminiApiKey = '';
+      if (typeof b.geminiModel === 'string') patch.geminiModel = b.geminiModel;
       store.updateSettings(patch);
       grader.cache.clear();
       return send(res, 200, teacherInfo());
