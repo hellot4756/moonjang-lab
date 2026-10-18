@@ -490,3 +490,7 @@ body.is-gate { background: linear-gradient(180deg, #18232e 0%, #223445 60%, #162
 .gate-leaf.left h1 { font-size: clamp(28px, 3.5vw, 46px); white-space: nowrap; }
 .gate-leaf.right { padding: clamp(24px, 3vw, 44px); }
 @media (max-width: 760px) { .gate-doors { grid-template-columns: 1fr; } .gate-leaf.left h1 { font-size: clamp(26px, 8vw, 38px); } }
+
+/* 입실 등록: 입력 칸 글씨는 남색으로 (흰 칸 위에서 또렷하게) */
+.gate-leaf.right input[type=text], .gate-leaf.right input[type=password], .gate-leaf.right input[type=number] { color: #16263f; font-weight: 600; caret-color: #16263f; }
+.gate-leaf.right input::placeholder { color: #6a7a90; opacity: 1; font-weight: 400; }
