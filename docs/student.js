@@ -433,7 +433,7 @@
     const wheres = r.checks ? Object.values(r.checks).filter((c) => !c.ok).map((c) => c.where) : [];
     const card = h('section', { class: 'card result ' + cls, tabindex: '-1', id: 'result' },
       h('div', { class: 'verdict-row' }, h('div', { class: 'verdict' }, title),
-        h('span', { class: 'stampbox sm' + (r.verdict === 'correct' ? ' free' : '') }, r.verdict === 'correct' ? '통과' : r.verdict === 'incorrect' ? '재수련' : '스승 확인')),
+        h('span', { class: 'stampbox sm' + (r.verdict === 'correct' ? ' free' : '') }, r.verdict === 'correct' ? '합격' : r.verdict === 'incorrect' ? '불합격' : '스승님 심사 중')),
       h('div', { class: 'sub' }, sub),
       sentenceView(r.sentence || '', wheres));
 
