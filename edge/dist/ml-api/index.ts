@@ -1236,7 +1236,7 @@ const C = require('./lib/conditions');
 const PORT = 0;
 const TEACHER_PASSWORD = process.env.TEACHER_PASSWORD || '';
 const DEFAULT_MODEL = 'claude-sonnet-5-5';
-const DEFAULT_GEMINI = 'gemini-2.5-flash';
+const DEFAULT_GEMINI = 'gemini-3.8-flash';
 const store = new DbStore();
 C.setHook({ save: (st) => (st ? store.putKv('conditions', st) : store.delKv('conditions')) });
 function aiConfig() {

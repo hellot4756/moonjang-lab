@@ -49,7 +49,7 @@ const PORT = parseInt(process.env.PORT, 10) || 3000;
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(ROOT, 'data');
 const TEACHER_PASSWORD = process.env.TEACHER_PASSWORD || '';
 const DEFAULT_MODEL = 'claude-sonnet-5-5';
-const DEFAULT_GEMINI = 'gemini-2.5-flash';
+const DEFAULT_GEMINI = 'gemini-3.8-flash';
 
 const store = new Store(DATA_DIR);
 C.init(path.join(DATA_DIR, 'conditions.json'));
