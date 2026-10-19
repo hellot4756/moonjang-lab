@@ -2023,6 +2023,23 @@ async function handleApi(req, res, pathname, query) {
       const b = await readBody(req, 2048);
       return send(res, 200, { deleted: store.deleteRecord(String(b.id || '')) });
     }
+    if (method === 'POST' && pathname === '/api/teacher/records/delete') {
+      const b = await readBody(req, 64 * 1024);
+      const ids = Array.isArray(b.ids) ? b.ids.slice(0, 500).map(String) : [];
+      let n = 0;
+      for (const id of ids) if (store.deleteRecord(id)) n++;
+      return send(res, 200, { deleted: n });
+    }
+    if (method === 'POST' && pathname === '/api/teacher/class/reset') {
+      const b = await readBody(req, 2048);
+      const cls = String(b.cls || '');
+      if (!cls) throw new HttpError(400, '반을 선택해 주세요.');
+      const ids = store.records.filter((r) => r.cls === cls).map((r) => r.id);
+      let n = 0;
+      for (const id of ids) if (store.deleteRecord(id)) n++;
+      for (const st of store.students.filter((x) => x.cls === cls)) store.deletePostersOf(st.sid);
+      return send(res, 200, { deleted: n });
+    }
     if (method === 'POST' && pathname === '/api/teacher/student/reset') {
       const b = await readBody(req, 2048);
       const sid = normSid(b.sid);

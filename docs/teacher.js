@@ -509,7 +509,19 @@
       if (!confirm(`화면에 보이는 기록 중 주제를 아직 판단하지 않은 ${ids.length}건을 모두 '적절'로 표시할까요? (부적절한 것은 나중에 개별로 바꿀 수 있어요)`)) return;
       try { const o = await api('/api/teacher/feedback/bulk', { ids, topic: 'ok' }); toast(`${o.changed}건을 '적절'로 표시했어요.`); load(); } catch (e) { toast(e.message, true); }
     } }, "보이는 기록 모두 '주제 적절'");
-    const tb = h('div', { class: 'toolbar' }, classSelect(() => load()), vsel, tsel, fsel, periodSelect(() => load()), autoBox(() => load()), h('span', { class: 'spacer' }), bulkOk, regradeAll);
+    const delShown = h('button', { class: 'btn sm danger', type: 'button', onclick: async () => {
+      const ids = recs.map((x) => x.id);
+      if (!ids.length) { toast('지울 기록이 없어요.', true); return; }
+      if (!confirm(`지금 화면에 보이는 기록 ${ids.length}건을 모두 지울까요? 되돌릴 수 없어요.\n(위의 반·판정·기간 선택에 맞는 기록 중 불러온 것만 지워져요.)`)) return;
+      try { const o = await api('/api/teacher/records/delete', { ids }); toast(`${o.deleted}건을 지웠어요.`); load(); } catch (e) { toast(e.message, true); }
+    } }, '보이는 기록 지우기');
+    const delClass = h('button', { class: 'btn sm danger', type: 'button', onclick: async () => {
+      if (!T.cls) { toast('위에서 반을 먼저 선택해 주세요.', true); return; }
+      if (!confirm(`${T.cls}의 모든 기록과 포스터 프롬프트를 지울까요? 되돌릴 수 없어요.`)) return;
+      if (!confirm(`정말 ${T.cls} 전체를 지울까요? 한 번 더 확인해요.`)) return;
+      try { const o = await api('/api/teacher/class/reset', { cls: T.cls }); toast(`${T.cls}: ${o.deleted}건을 지웠어요.`); load(); } catch (e) { toast(e.message, true); }
+    } }, '이 반 기록 모두 지우기');
+    const tb = h('div', { class: 'toolbar' }, classSelect(() => load()), vsel, tsel, fsel, periodSelect(() => load()), autoBox(() => load()), h('span', { class: 'spacer' }), bulkOk, regradeAll, delShown, delClass);
     body.append(tb, list, moreBtn);
     api('/api/teacher/overview').then((o) => { T.classes = o.classes; tb.replaceChild(classSelect(() => load()), tb.firstChild); }).catch(() => {});
     load();
