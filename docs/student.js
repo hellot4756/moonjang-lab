@@ -53,7 +53,8 @@
     if (S.token) opt.headers.Authorization = 'Bearer ' + S.token;
     if (body !== undefined) opt.body = JSON.stringify(body);
     let res;
-    try { res = await fetch((window.ML_API || '') + path, opt); } catch (e) { throw new Error('서버에 연결할 수 없어요. 와이파이 연결을 확인해 주세요.'); }
+    const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 100000); opt.signal = ctl.signal;
+    try { res = await fetch((window.ML_API || '') + path, opt); } catch (e) { throw new Error(e && e.name === 'AbortError' ? '응답이 너무 오래 걸려요. 잠시 뒤에 [내 기록]을 확인하거나 다시 제출해 주세요.' : '서버에 연결할 수 없어요. 와이파이 연결을 확인해 주세요.'); } finally { clearTimeout(tm); }
     let data = {};
     try { data = await res.json(); } catch (e) { /* 본문 없음 */ }
     if (!res.ok) {

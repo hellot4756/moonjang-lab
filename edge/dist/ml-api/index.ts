@@ -734,11 +734,13 @@ class Grader {
       : (cfg.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '') + '/v1/messages';
     const who = gem ? 'Gemini' : 'Claude';
     const delays = [0, 1500, 4000];
+    const t0 = Date.now();
     let lastErr = null;
     for (let i = 0; i < delays.length; i++) {
+      if (i > 0 && Date.now() - t0 > 45000) break;   // 학생을 너무 오래 기다리게 하지 않는다
       if (delays[i]) await sleep(delays[i]);
       const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), 60000);
+      const timer = setTimeout(() => ctl.abort(), 35000);
       try {
         const res = await fetch(url, {
           method: 'POST',
@@ -750,7 +752,7 @@ class Grader {
             ? {
               systemInstruction: { parts: [{ text: system }] },
               contents: [{ role: 'user', parts: [{ text: userMsg }] }],
-              generationConfig: { maxOutputTokens: Math.max(maxTokens * 4, 2000), temperature: 0.2 },
+              generationConfig: Object.assign({ maxOutputTokens: Math.max(maxTokens * 4, 2000), temperature: 0.2 }, this.noThinkOff ? {} : { thinkingConfig: { thinkingBudget: 0 } }),
             }
             : { model: cfg.model, max_tokens: maxTokens, system, messages: [{ role: 'user', content: userMsg }] }),
         });
@@ -772,6 +774,7 @@ class Grader {
         const badKey = res.status === 401 || res.status === 403 || (gem && res.status === 400 && /api key/i.test(msg));
         if (badKey) return { ok: false, code: 'auth', message: `${who} API 키가 올바르지 않거나 권한이 없어요.` };
         if (res.status === 404) return { ok: false, code: 'model', message: `모델 이름을 확인해 주세요. (${msg})` };
+        if (gem && res.status === 400 && /think/i.test(msg) && !this.noThinkOff) { this.noThinkOff = true; i--; continue; }   // 이 모델은 생각 끄기를 받지 않으면 빼고 다시
         if (res.status === 400) return { ok: false, code: 'request', message: `요청이 거절되었어요. (${msg})` };
       } catch (e) {
         lastErr = { status: 0, message: e.name === 'AbortError' ? '응답 시간이 너무 길어요.' : String(e.message || e) };
@@ -788,7 +791,9 @@ class Grader {
     await this.acquire();
     try {
       let lastMsg = '';
+      const t0 = Date.now();
       for (let attempt = 0; attempt < 2; attempt++) {
+        if (attempt > 0 && Date.now() - t0 > 30000) break;
         const out = await this.callApi(SYSTEM, buildUserMessage(r, sentence), 1500);
         if (!out.ok) return out;
         const result = normalize(extractJson(out.text), sentence);
