@@ -200,10 +200,7 @@
     kids.push(h('div', { class: 'wrap pform', style: 'max-width:none' },
       h('label', { class: 'field', for: 'pp-sent' }, '어떤 문장으로 만들까요?', sel),
       text('topic', '공익광고 주제 (바꿀 수 있어요)', '예: 플라스틱 사용 줄이기'),
-      chips('textMode'),
-      F.textMode === 'none' ? h('p', { class: 'muted small' }, '문장은 [핵심 메시지]로만 전달되고, 포스터에는 글자가 들어가지 않아요. 문구는 그림을 만든 뒤 직접 얹을 수 있어요.')
-        : [text('sentence', '포스터에 넣을 문장 (고칠 수 있어요)', '', 2), chips('font'), chips('textPos'),
-          h('p', { class: 'muted small' }, '참고: 이미지 AI는 한글 글씨를 틀리게 그릴 때가 있어요. 글자가 깨지면 \'글자 없이 그림만\'으로 만든 뒤 직접 문구를 넣어 보세요.')],
+      text('sentence', '포스터에 들어갈 문장 (꼭 그대로 들어가요. 고칠 수 있어요)', '', 2), chips('font'), chips('textPos'),
       chips('format'), chips('style'), chips('mood'), chips('color', colorCustom), chips('composition'), chips('audience'),
       text('subject', '누가·무엇이 나오나요?', '예: 교복을 입은 학생들, 북극곰, 페트병'),
       text('scene', '어디에서 어떤 장면인가요?', '예: 쓰레기가 가득한 바다, 깨끗한 학교 운동장'),
@@ -227,13 +224,21 @@
       ta.value = PS.out[lang];
       const tabBtn = (code, name) => h('button', { type: 'button', class: 'chip' + (lang === code ? ' on' : ''), 'aria-pressed': String(lang === code), onclick: () => { PS.lang = code; save(); drawPoster(box); } }, name);
       const msg = h('span', { class: 'muted small', role: 'status' });
-      const room = S.padlet && S.padlet.link ? h('a', { id: 'pp-room', class: 'btn', href: S.padlet.link, target: '_blank', rel: 'noopener' }, '내 패들렛 방 열기 →') : null;
+      const hasRoom = !!(S.padlet && S.padlet.link);
+      const room = hasRoom ? h('a', { id: 'pp-room', class: 'btn', href: S.padlet.link, target: '_blank', rel: 'noopener' }, S.padlet.board ? '패들렛 보드 열기 →' : '내 패들렛 방 열기 →') : null;
+      const copyBtn = h('button', { class: 'btn primary', type: 'button' }, '① 복사하기');
+      copyBtn.addEventListener('click', async () => {
+        const ok = await copyText(ta.value, ta);
+        msg.textContent = ok ? (hasRoom ? '복사했어요! 이미지 AI에서 그림을 만든 뒤, ② 버튼으로 내 패들렛 방에 가서 올려요.' : '복사했어요! 이미지 AI에 붙여 넣으세요.') : '복사가 안 돼요. 글 위를 길게 눌러 직접 복사해 주세요.';
+        if (ok && room) { copyBtn.classList.remove('primary'); room.classList.add('primary'); }
+      });
+      if (room) room.prepend('② ');
       kids.push(h('div', { id: 'pp-out', class: 'block', style: 'margin-top:14px' },
         h('div', { class: 'ttl' }, '완성된 프롬프트'),
         h('div', { class: 'chips', style: 'margin:6px 0' }, tabBtn('ko', '한국어'), tabBtn('en', 'English')),
         ta,
-        h('div', { class: 'actions' },
-          h('button', { class: 'btn primary', type: 'button', onclick: async () => { const ok = await copyText(ta.value, ta); msg.textContent = ok ? (room ? '복사했어요! 이미지 AI에서 그림을 만든 뒤, 내 패들렛 방에 올려요.' : '복사했어요! 이미지 AI에 붙여 넣으세요.') : '복사가 안 돼요. 글 위를 길게 눌러 직접 복사해 주세요.'; if (ok && room) room.classList.add('primary'); } }, '복사하기'), room, msg),
+        h('div', { class: 'actions' }, copyBtn, room, msg),
+        !hasRoom ? h('p', { class: 'muted small' }, '내 패들렛 방 주소가 아직 등록되지 않았어요. 선생님이 안내한 패들렛 방으로 직접 이동해 주세요.') : null,
         h('p', { class: 'muted small' }, '복사한 글을 선생님이 안내한 이미지 만들기 도구에 붙여 넣어 보세요. 마음에 안 들면 위의 선택을 바꾸고 [프롬프트 만들기]를 다시 눌러요.')));
     }
     box.replaceChildren(...kids.flat());
@@ -292,7 +297,7 @@
         h('button', { class: S.padlet.post ? 'btn' : 'btn primary', type: 'button', onclick: async () => { msg.textContent = (await copyText(ta.value, ta)) ? '복사했어요! 패들렛에 붙여 넣으세요.' : '복사가 안 돼요. 위 글을 길게 눌러 직접 복사해 주세요.'; } }, '한 번에 복사하기'), msg)));
     // 패들렛 내 방에 바로 올리기 (선생님이 연결해 둔 경우)
     const postedAt = ((S.last && S.last.id === item.id && S.last.padletAt) || (S.history.find((x) => x.id === item.id) || {}).padletAt || 0);
-    const roomLink = S.padlet.link ? h('a', { class: 'btn' + (S.padlet.post ? '' : ' primary'), href: S.padlet.link, target: '_blank', rel: 'noopener' }, '내 패들렛 방 열기') : null;
+    const roomLink = S.padlet.link ? h('a', { class: 'btn' + (S.padlet.post ? '' : ' primary'), href: S.padlet.link, target: '_blank', rel: 'noopener' }, S.padlet.board ? '패들렛 보드 열기' : '내 패들렛 방 열기') : null;
     if (S.padlet.post) {
       const pmsg = h('div', { class: 'notice' + (postedAt ? ' ok' : ''), role: 'status', hidden: !postedAt }, postedAt ? '이 문장은 이미 내 패들렛 방에 올렸어요.' : '');
       const go = h('button', { class: 'btn primary', type: 'button' }, postedAt ? '다시 올리기' : '패들렛에 올리기');
@@ -557,6 +562,9 @@
       h('div', { class: 'chip' }, `${st.cls} ${st.name}`, h('button', { class: 'btn sm', type: 'button', onclick: () => logout(false) }, '나가기')));
 
     const nodes = [top];
+    const fbCount = S.history.filter((x) => x.tfeedback).length;
+    nodes.push(h('div', { class: 'actions', style: 'margin-top:0' }, h('button', { class: 'btn', type: 'button', onclick: toggleHist }, S.showHist ? '내 기록 닫기' : '내 기록 보기' + (fbCount ? ` (선생님 피드백 ${fbCount})` : ''))));
+    if (S.showHist) nodes.push(histCard());
     if (S.notice) nodes.push(h('div', { class: 'notice bad', role: 'alert' }, S.notice));
     if (c) {
       nodes.push(h('section', { class: 'card' },
@@ -575,9 +583,6 @@
     }
     const rc = resultCard();
     if (rc) nodes.push(rc);
-    const fbCount = S.history.filter((x) => x.tfeedback).length;
-    nodes.push(h('div', { class: 'actions', style: 'margin-top:0' }, h('button', { class: 'btn', type: 'button', onclick: toggleHist }, S.showHist ? '내 기록 닫기' : '내 기록 보기' + (fbCount ? ` (선생님 피드백 ${fbCount})` : ''))));
-    if (S.showHist) nodes.push(histCard());
     nodes.push(h('div', { class: 'actions', style: 'margin-top:0' }, h('button', { class: 'btn', type: 'button', onclick: togglePadlet }, S.showPadlet ? '패들렛 닫기' : '패들렛에 올리기')));
     if (S.showPadlet) nodes.push(padletCard());
     if (S.posterOn) {

@@ -925,7 +925,7 @@
       try {
         const o = await api('/api/teacher/padlet/import', { cls: pcls.value, url: purl.value, useAi: puseAi.checked });
         if (!o.ok) { pshow(o.message + (o.detail ? ' · ' + o.detail : ''), 'bad'); return; }
-        pboard.value = o.boardId; prooms.value = o.roomsText;
+        pboard.value = o.boardId; prooms.value = o.roomsText; if (o.boardUrl) purl.value = o.boardUrl;
         pres.replaceChildren(
           h('p', null, h('b', null, `「${o.title || '제목 없음'}」`), ` 섹션 ${o.total}개 중 ${o.matched}개를 명단과 맞췄어요 (규칙 ${o.byRule}개${o.aiAsked ? `, AI ${o.aiUsed}개` : ''}).`),
           o.aiError ? h('p', { class: 'muted' }, 'AI 해석은 건너뛰었어요: ' + o.aiError) : null,
@@ -943,14 +943,14 @@
     };
     api('/api/teacher/overview').then((o) => { for (const c of o.classes) pcls.append(h('option', { value: c.cls }, `${c.cls} (${c.count}명)`)); }).catch(() => {});
     pcls.addEventListener('change', async () => {
-      pboard.value = ''; prooms.value = ''; refreshStat();
+      pboard.value = ''; prooms.value = ''; purl.value = ''; refreshStat();
       if (!pcls.value) return;
-      try { const r = await api('/api/teacher/padlet/rooms?' + qs({ cls: pcls.value })); pboard.value = r.boardId; prooms.value = r.roomsText; } catch (e) { pshow(e.message, 'bad'); }
+      try { const r = await api('/api/teacher/padlet/rooms?' + qs({ cls: pcls.value })); pboard.value = r.boardId; prooms.value = r.roomsText; purl.value = r.boardUrl || ''; } catch (e) { pshow(e.message, 'bad'); }
     });
     const psave = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
       try {
         const b = {}; if (pkey.value.trim()) b.apiKey = pkey.value;
-        if (pcls.value) { b.cls = pcls.value; b.boardId = pboard.value; b.roomsText = prooms.value; }
+        if (pcls.value) { b.cls = pcls.value; b.boardId = pboard.value; b.roomsText = prooms.value; b.boardUrl = /^https:\/\/padlet\.com\//.test(purl.value.trim()) ? purl.value.trim() : ''; }
         if (!Object.keys(b).length) { pshow('저장할 내용이 없어요.', 'bad'); return; }
         const o = await api('/api/teacher/padlet', b, 'PUT'); T.info = o; pkey.value = '';
         pshow('저장했어요.' + (o.skipped && o.skipped.length ? ` 읽지 못한 줄 ${o.skipped.length}개: ${o.skipped.slice(0, 3).join(' | ')}` : ''), 'ok'); refreshStat();
@@ -972,7 +972,7 @@
           pInfo.lastError ? h('span', { class: 'pill bad', style: 'margin-left:8px', title: pInfo.lastError }, '최근 오류: ' + pInfo.lastError) : null),
         h('label', { class: 'field', for: 'pkey' }, 'Padlet API 키', pkey),
         h('label', { class: 'field', for: 'pcls' }, '반', pcls),
-        h('label', { class: 'field', for: 'purl' }, '패들렛 주소 (보드 주소를 복사해 붙여 넣으세요)', purl),
+        h('label', { class: 'field', for: 'purl' }, '패들렛 주소 (보드 주소를 복사해 붙여 넣으세요. 저장하면 학생의 [방 열기] 버튼이 이 주소로 가요. 번호별 소회의실 링크를 따로 넣으면 그 링크가 우선이에요)', purl),
         h('label', { class: 'check-line' }, puseAi, ' 규칙으로 못 읽은 섹션 제목은 AI에게 번호를 물어보기 (제목만 보내고 학생 이름·명단은 보내지 않아요)'),
         h('div', { class: 'toolbar' }, pimport), pres,
         h('label', { class: 'field', for: 'pboard' }, '보드 ID', pboard),

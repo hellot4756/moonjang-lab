@@ -69,13 +69,6 @@
         ['kid', '어린이', '어린이', 'young children'],
       ],
     },
-    textMode: {
-      label: '포스터 안의 글자', def: 'in',
-      items: [
-        ['in', '내 문장을 글자로 넣기', '', ''],
-        ['none', '글자 없이 그림만', '', ''],
-      ],
-    },
     font: {
       label: '글씨체', def: 'gothic',
       items: [
@@ -118,7 +111,7 @@
     const en = lang === 'en';
     const t = (key) => pick(key, v[key])[en ? 3 : 2];
     const topic = clean(v.topic), sentence = clean(v.sentence);
-    const textIn = v.textMode !== 'none' && sentence;
+    const textIn = !!sentence;   // 학생이 만든 문장은 언제나 포스터에 들어간다
     const colorKo = clean(v.colorCustom) || t('color');
     const L = [];
 
@@ -135,9 +128,8 @@
       if (clean(v.scene)) L.push(`Scene / background: ${clean(v.scene)}`);
       L.push(`Target audience: ${t('audience')}`);
       if (textIn) {
-        L.push(`Text on the poster: write the Korean message "${sentence}" exactly as written, ${t('textPos')}, in ${t('font')}. Do not change or misspell any Korean characters.`);
-      } else {
-        L.push('Text on the poster: do not include any text or letters; image only.');
+        L.push(`Text on the poster: place the following Korean sentence ${t('textPos')}, large, in ${t('font')}: "${sentence}"`);
+        L.push('The sentence must appear on the poster exactly as written, with no changes at all: do not rephrase, shorten, translate, add or drop any word, and do not change the spacing, punctuation or any Korean character. Do not add any other text.');
       }
       if (clean(v.extra)) L.push(`Extra requests: ${clean(v.extra)}`);
       const avoid = ['violent or sexual content', 'real people or celebrities', 'brand logos or trademarks'];
@@ -161,9 +153,8 @@
     if (clean(v.scene)) L.push(`[장면·배경] ${clean(v.scene)}`);
     L.push(`[보는 사람] ${t('audience')}`);
     if (textIn) {
-      L.push(`[포스터 안의 글자] "${sentence}" 문장을 ${t('textPos')}에 ${t('font')}로 크게 넣어 주세요. 한글 글자를 바꾸거나 틀리게 쓰지 말고 그대로 써 주세요.`);
-    } else {
-      L.push('[포스터 안의 글자] 글자는 넣지 말고 그림만 그려 주세요.');
+      L.push(`[포스터 안의 글자] 아래 문장을 ${t('textPos')}에 ${t('font')}로 크게 넣어 주세요: "${sentence}"`);
+      L.push('이 문장은 포스터에 반드시 들어가야 하며, 한 글자도 바꾸지 말고 변형 없이 그대로 써 주세요. 말을 바꾸거나 줄이거나 번역하거나 단어를 더하거나 빼지 말고, 띄어쓰기와 문장부호, 한글 글자도 그대로 지켜 주세요. 이 문장 말고 다른 글자는 넣지 마세요.');
     }
     if (clean(v.extra)) L.push(`[세부 요청] ${clean(v.extra)}`);
     const avoid = [];

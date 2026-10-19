@@ -213,7 +213,8 @@ function padletFor(st) {
   const { cfg, room } = padletRoom(st);
   return {
     post: !!(store.settings.padletApiKey && cfg && cfg.boardId && room && room.section),
-    link: (room && room.link) || '',
+    link: (room && room.link) || (cfg && cfg.boardUrl) || '',
+    board: !(room && room.link) && !!(cfg && cfg.boardUrl),   // 개인 방 링크가 없어 보드 전체 주소로 대신하는 경우
   };
 }
 
@@ -582,7 +583,9 @@ async function handleApi(req, res, pathname, query) {
         if (boardId && !PADLET.BOARD_RE.test(boardId)) throw new HttpError(400, '보드 ID 형식이 올바르지 않아요.');
         const parsed = PADLET.parseRooms(b.roomsText);
         skipped = parsed.skipped;
-        patch.padletClass = { cls, boardId, rooms: parsed.rooms };
+        const bu = String(b.boardUrl || '').trim();
+        if (bu && !PADLET.LINK_RE.test(bu)) throw new HttpError(400, '패들렛 주소는 https://padlet.com/ 으로 시작해야 해요.');
+        patch.padletClass = { cls, boardId, rooms: parsed.rooms, boardUrl: bu };
       }
       store.updateSettings(patch);
       return send(res, 200, Object.assign(teacherInfo(), { skipped }));
@@ -621,7 +624,7 @@ async function handleApi(req, res, pathname, query) {
       const lines = Object.entries(rooms).sort((x, y) => x[0] - y[0]).map(([no, r]) => [no, r.section, r.link].filter(Boolean).join('\t'));
       const got_nos = new Set(matched.map((r) => r.no));
       return send(res, 200, {
-        ok: true, boardId: got.boardId, title: got.title, total: rows.length, matched: matched.length, aiUsed: ai.n || 0, aiError: ai.error || '',
+        ok: true, boardId: got.boardId, boardUrl: got.boardUrl || '', title: got.title, total: rows.length, matched: matched.length, aiUsed: ai.n || 0, aiError: ai.error || '',
         aiAsked: !!b.useAi && grader.configured(),
         unmatched: rows.filter((r) => !r.no).map((r) => ({ title: r.title, note: r.note })),
         missing: roster.filter((x) => !got_nos.has(x.no)).map((x) => ({ no: x.no, name: x.name })),
@@ -634,7 +637,7 @@ async function handleApi(req, res, pathname, query) {
     if (method === 'GET' && pathname === '/api/teacher/padlet/rooms') {
       const cfg = (store.settings.padlet || {})[query.get('cls') || ''] || { boardId: '', rooms: {} };
       const lines = Object.entries(cfg.rooms || {}).sort((a, b) => a[0] - b[0]).map(([no, r]) => [no, r.section, r.link].filter(Boolean).join('\t'));
-      return send(res, 200, { boardId: cfg.boardId || '', roomsText: lines.join('\n') });
+      return send(res, 200, { boardId: cfg.boardId || '', boardUrl: cfg.boardUrl || '', roomsText: lines.join('\n') });
     }
 
     if (method === 'POST' && pathname === '/api/teacher/ping') {

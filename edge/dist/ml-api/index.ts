@@ -112,7 +112,9 @@ async function fetchSections(key, boardId) {
     id: String(x.id || ''), title: String((x.attributes && x.attributes.title) || '').trim(),
     sortIndex: x.attributes && typeof x.attributes.sortIndex === 'number' ? x.attributes.sortIndex : i,
   })).filter((x) => x.id).sort((a, b) => a.sortIndex - b.sortIndex);
-  return { ok: true, boardId: String(data.id || boardId), title: String((data.attributes && data.attributes.title) || ''), sections };
+  const wu = data.attributes && data.attributes.webUrl;
+  const boardUrl = wu && typeof wu === 'object' && LINK_RE.test(String(wu.live || '')) ? String(wu.live) : '';
+  return { ok: true, boardUrl, boardId: String(data.id || boardId), title: String((data.attributes && data.attributes.title) || ''), sections };
 }
 function titleNo(t) {
   const s = String(t || '');
@@ -231,13 +233,6 @@ __def('poster', function (module, exports, require, process, Buffer) {
         ['kid', '어린이', '어린이', 'young children'],
       ],
     },
-    textMode: {
-      label: '포스터 안의 글자', def: 'in',
-      items: [
-        ['in', '내 문장을 글자로 넣기', '', ''],
-        ['none', '글자 없이 그림만', '', ''],
-      ],
-    },
     font: {
       label: '글씨체', def: 'gothic',
       items: [
@@ -274,7 +269,7 @@ __def('poster', function (module, exports, require, process, Buffer) {
     const en = lang === 'en';
     const t = (key) => pick(key, v[key])[en ? 3 : 2];
     const topic = clean(v.topic), sentence = clean(v.sentence);
-    const textIn = v.textMode !== 'none' && sentence;
+    const textIn = !!sentence;   // 학생이 만든 문장은 언제나 포스터에 들어간다
     const colorKo = clean(v.colorCustom) || t('color');
     const L = [];
     if (en) {
@@ -290,9 +285,8 @@ __def('poster', function (module, exports, require, process, Buffer) {
       if (clean(v.scene)) L.push(`Scene / background: ${clean(v.scene)}`);
       L.push(`Target audience: ${t('audience')}`);
       if (textIn) {
-        L.push(`Text on the poster: write the Korean message "${sentence}" exactly as written, ${t('textPos')}, in ${t('font')}. Do not change or misspell any Korean characters.`);
-      } else {
-        L.push('Text on the poster: do not include any text or letters; image only.');
+        L.push(`Text on the poster: place the following Korean sentence ${t('textPos')}, large, in ${t('font')}: "${sentence}"`);
+        L.push('The sentence must appear on the poster exactly as written, with no changes at all: do not rephrase, shorten, translate, add or drop any word, and do not change the spacing, punctuation or any Korean character. Do not add any other text.');
       }
       if (clean(v.extra)) L.push(`Extra requests: ${clean(v.extra)}`);
       const avoid = ['violent or sexual content', 'real people or celebrities', 'brand logos or trademarks'];
@@ -315,9 +309,8 @@ __def('poster', function (module, exports, require, process, Buffer) {
     if (clean(v.scene)) L.push(`[장면·배경] ${clean(v.scene)}`);
     L.push(`[보는 사람] ${t('audience')}`);
     if (textIn) {
-      L.push(`[포스터 안의 글자] "${sentence}" 문장을 ${t('textPos')}에 ${t('font')}로 크게 넣어 주세요. 한글 글자를 바꾸거나 틀리게 쓰지 말고 그대로 써 주세요.`);
-    } else {
-      L.push('[포스터 안의 글자] 글자는 넣지 말고 그림만 그려 주세요.');
+      L.push(`[포스터 안의 글자] 아래 문장을 ${t('textPos')}에 ${t('font')}로 크게 넣어 주세요: "${sentence}"`);
+      L.push('이 문장은 포스터에 반드시 들어가야 하며, 한 글자도 바꾸지 말고 변형 없이 그대로 써 주세요. 말을 바꾸거나 줄이거나 번역하거나 단어를 더하거나 빼지 말고, 띄어쓰기와 문장부호, 한글 글자도 그대로 지켜 주세요. 이 문장 말고 다른 글자는 넣지 마세요.');
     }
     if (clean(v.extra)) L.push(`[세부 요청] ${clean(v.extra)}`);
     const avoid = [];
@@ -461,9 +454,9 @@ class Store {
     if (typeof patch.topicChoice === 'boolean') s.topicChoice = patch.topicChoice;
     if (typeof patch.padletApiKey === 'string') s.padletApiKey = patch.padletApiKey.trim().slice(0, 300);
     if (patch.padletClass && typeof patch.padletClass === 'object') {
-      const { cls, boardId, rooms } = patch.padletClass;
+      const { cls, boardId, rooms, boardUrl } = patch.padletClass;
       if (!s.padlet || typeof s.padlet !== 'object') s.padlet = {};
-      if (boardId || Object.keys(rooms || {}).length) s.padlet[cls] = { boardId: boardId || '', rooms: rooms || {} }; else delete s.padlet[cls];
+      if (boardId || Object.keys(rooms || {}).length) s.padlet[cls] = { boardId: boardId || '', rooms: rooms || {}, boardUrl: boardUrl || '' }; else delete s.padlet[cls];
     }
     if (typeof patch.padletTemplate === 'string') s.padletTemplate = patch.padletTemplate.replace(/\r/g, '').slice(0, 1000);
     if (typeof patch.apiKey === 'string') s.apiKey = patch.apiKey.trim();
@@ -1437,7 +1430,8 @@ function padletFor(st) {
   const { cfg, room } = padletRoom(st);
   return {
     post: !!(store.settings.padletApiKey && cfg && cfg.boardId && room && room.section),
-    link: (room && room.link) || '',
+    link: (room && room.link) || (cfg && cfg.boardUrl) || '',
+    board: !(room && room.link) && !!(cfg && cfg.boardUrl),   // 개인 방 링크가 없어 보드 전체 주소로 대신하는 경우
   };
 }
 function myHistory(sid, limit) {
@@ -1765,7 +1759,9 @@ async function handleApi(req, res, pathname, query) {
         if (boardId && !PADLET.BOARD_RE.test(boardId)) throw new HttpError(400, '보드 ID 형식이 올바르지 않아요.');
         const parsed = PADLET.parseRooms(b.roomsText);
         skipped = parsed.skipped;
-        patch.padletClass = { cls, boardId, rooms: parsed.rooms };
+        const bu = String(b.boardUrl || '').trim();
+        if (bu && !PADLET.LINK_RE.test(bu)) throw new HttpError(400, '패들렛 주소는 https://padlet.com/ 으로 시작해야 해요.');
+        patch.padletClass = { cls, boardId, rooms: parsed.rooms, boardUrl: bu };
       }
       store.updateSettings(patch);
       return send(res, 200, Object.assign(teacherInfo(), { skipped }));
@@ -1800,7 +1796,7 @@ async function handleApi(req, res, pathname, query) {
       const lines = Object.entries(rooms).sort((x, y) => x[0] - y[0]).map(([no, r]) => [no, r.section, r.link].filter(Boolean).join('\t'));
       const got_nos = new Set(matched.map((r) => r.no));
       return send(res, 200, {
-        ok: true, boardId: got.boardId, title: got.title, total: rows.length, matched: matched.length, aiUsed: ai.n || 0, aiError: ai.error || '',
+        ok: true, boardId: got.boardId, boardUrl: got.boardUrl || '', title: got.title, total: rows.length, matched: matched.length, aiUsed: ai.n || 0, aiError: ai.error || '',
         aiAsked: !!b.useAi && grader.configured(),
         unmatched: rows.filter((r) => !r.no).map((r) => ({ title: r.title, note: r.note })),
         missing: roster.filter((x) => !got_nos.has(x.no)).map((x) => ({ no: x.no, name: x.name })),
@@ -1812,7 +1808,7 @@ async function handleApi(req, res, pathname, query) {
     if (method === 'GET' && pathname === '/api/teacher/padlet/rooms') {
       const cfg = (store.settings.padlet || {})[query.get('cls') || ''] || { boardId: '', rooms: {} };
       const lines = Object.entries(cfg.rooms || {}).sort((a, b) => a[0] - b[0]).map(([no, r]) => [no, r.section, r.link].filter(Boolean).join('\t'));
-      return send(res, 200, { boardId: cfg.boardId || '', roomsText: lines.join('\n') });
+      return send(res, 200, { boardId: cfg.boardId || '', boardUrl: cfg.boardUrl || '', roomsText: lines.join('\n') });
     }
     if (method === 'POST' && pathname === '/api/teacher/ping') {
       const out = await grader.ping();
