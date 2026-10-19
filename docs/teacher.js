@@ -912,8 +912,30 @@
     const pmsg = h('div', { hidden: true });
     const pshow = (t, cls) => { pmsg.className = 'notice ' + cls; pmsg.textContent = t; pmsg.hidden = false; };
     const pcls = h('select', { id: 'pcls', 'aria-label': '반 선택' }, h('option', { value: '' }, '반 선택'));
-    const pboard = h('input', { type: 'text', id: 'pboard', autocomplete: 'off', placeholder: '예: board_m41pvaepzo0rvxVO' });
+    const pboard = h('input', { type: 'text', id: 'pboard', autocomplete: 'off', placeholder: '위에서 주소를 불러오면 자동으로 채워져요' });
     const prooms = h('textarea', { id: 'prooms', rows: '8', style: 'font-family:ui-monospace,Consolas,monospace;font-size:.85rem', placeholder: '번호  섹션ID(sec_…)  소회의실 링크(https://padlet.com/…)\n1  sec_AbCd…  https://padlet.com/…/breakout-room/…' });
+    const purl = h('input', { type: 'text', id: 'purl', autocomplete: 'off', placeholder: '예: https://padlet.com/내아이디/제목-abcd1234efgh5678' });
+    const puseAi = h('input', { type: 'checkbox', id: 'puseai', checked: true });
+    const pres = h('div', { hidden: true, class: 'small' });
+    const pimport = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
+      if (!pcls.value) { pshow('반을 먼저 선택해 주세요.', 'bad'); return; }
+      if (!purl.value.trim()) { pshow('패들렛 주소를 넣어 주세요.', 'bad'); return; }
+      if (!T.info.settings.padlet.keySet && !pkey.value.trim()) { pshow('패들렛 API 키를 먼저 입력하고 [저장]해 주세요.', 'bad'); return; }
+      pshow('보드를 읽고 명단과 맞추는 중이에요…', 'info'); pres.hidden = true;
+      try {
+        const o = await api('/api/teacher/padlet/import', { cls: pcls.value, url: purl.value, useAi: puseAi.checked });
+        if (!o.ok) { pshow(o.message + (o.detail ? ' · ' + o.detail : ''), 'bad'); return; }
+        pboard.value = o.boardId; prooms.value = o.roomsText;
+        pres.replaceChildren(
+          h('p', null, h('b', null, `「${o.title || '제목 없음'}」`), ` 섹션 ${o.total}개 중 ${o.matched}개를 명단과 맞췄어요 (규칙 ${o.byRule}개${o.aiAsked ? `, AI ${o.aiUsed}개` : ''}).`),
+          o.aiError ? h('p', { class: 'muted' }, 'AI 해석은 건너뛰었어요: ' + o.aiError) : null,
+          o.unmatched.length ? h('p', null, h('b', null, '맞추지 못한 섹션: '), o.unmatched.slice(0, 12).map((u) => u.title + (u.note ? `(${u.note})` : '')).join(' · ') + (o.unmatched.length > 12 ? ` 외 ${o.unmatched.length - 12}개` : '')) : null,
+          o.missing.length ? h('p', null, h('b', null, '섹션이 없는 학생: '), o.missing.slice(0, 20).map((m) => `${m.no}번 ${m.name}`).join(', ') + (o.missing.length > 20 ? ` 외 ${o.missing.length - 20}명` : '')) : null,
+          o.linksMissing ? h('p', { class: 'muted' }, `소회의실 링크는 패들렛이 API로 주지 않아요. 링크가 비어 있는 방 ${o.linksMissing}개는 아래 목록 줄 끝에 직접 붙여 넣어 주세요(없어도 바로 올리기는 돼요).`) : null,
+          h('p', null, '아래 목록을 확인한 뒤 ', h('b', null, '[저장]'), '을 눌러야 적용돼요.'));
+        pres.hidden = false; pshow('불러왔어요. 확인하고 저장해 주세요.', 'ok');
+      } catch (e) { pshow(e.message, 'bad'); }
+    } }, '섹션 자동 불러오기');
     const pstat = h('p', { class: 'muted small' });
     const refreshStat = () => {
       const c = (T.info.settings.padlet.classes || {})[pcls.value];
@@ -950,6 +972,9 @@
           pInfo.lastError ? h('span', { class: 'pill bad', style: 'margin-left:8px', title: pInfo.lastError }, '최근 오류: ' + pInfo.lastError) : null),
         h('label', { class: 'field', for: 'pkey' }, 'Padlet API 키', pkey),
         h('label', { class: 'field', for: 'pcls' }, '반', pcls),
+        h('label', { class: 'field', for: 'purl' }, '패들렛 주소 (보드 주소를 복사해 붙여 넣으세요)', purl),
+        h('label', { class: 'check-line' }, puseAi, ' 규칙으로 못 읽은 섹션 제목은 AI에게 번호를 물어보기 (제목만 보내고 학생 이름·명단은 보내지 않아요)'),
+        h('div', { class: 'toolbar' }, pimport), pres,
         h('label', { class: 'field', for: 'pboard' }, '보드 ID', pboard),
         h('label', { class: 'field', for: 'prooms' }, '번호별 섹션 ID·링크 (한 줄에 한 명, 엑셀에서 복사해 붙여 넣어도 돼요)', prooms),
         pstat,

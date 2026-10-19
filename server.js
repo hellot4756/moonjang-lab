@@ -595,6 +595,42 @@ async function handleApi(req, res, pathname, query) {
       return send(res, 200, out);
     }
 
+    // 패들렛 주소 → 보드 ID·섹션 자동 불러오기 → 번호/이름으로 명단과 매칭 (규칙 먼저, 못 읽은 제목만 AI)
+    if (method === 'POST' && pathname === '/api/teacher/padlet/import') {
+      const b = await readBody(req, 4096);
+      const cls = String(b.cls || '');
+      const roster = store.students.filter((x) => x.cls === cls).map((x) => ({ no: Number(x.no), name: x.name })).filter((x) => x.no > 0);
+      if (!store.students.some((x) => x.cls === cls)) throw new HttpError(400, '반을 선택해 주세요.');
+      if (!roster.length) throw new HttpError(400, '이 반 학생들의 번호를 학번에서 읽지 못했어요. 명단을 5자리 학번(예: 20301)으로 등록해 주세요.');
+      const boardId = PADLET.boardIdFromInput(b.url);
+      const got = await PADLET.fetchSections(store.settings.padletApiKey, boardId);
+      if (!got.ok) return send(res, 200, { ok: false, message: got.message, detail: got.detail || '' });
+      const rows = PADLET.matchSections(got.sections, roster);
+      let ai = { n: 0 };
+      if (b.useAi && grader.configured()) {
+        const maxNo = Math.max(...roster.map((x) => x.no));
+        ai = (await PADLET.aiFill(rows, maxNo, (sy, um, mt) => grader.callApi(sy, um, mt), require('./lib/grader').extractJson)) || { n: 0 };
+        // AI 가 찾은 번호는 이 반 명단에 있는 번호만 인정한다
+        const has = new Set(roster.map((x) => x.no));
+        for (const r of rows) if (r.by === 'AI' && !has.has(r.no)) { r.no = 0; r.by = ''; r.note = '명단에 없는 번호예요'; }
+      }
+      const cfg = (store.settings.padlet || {})[cls] || { rooms: {} };
+      const rooms = Object.assign({}, cfg.rooms || {});
+      const matched = rows.filter((r) => r.no);
+      for (const r of matched) rooms[String(r.no)] = { section: r.id, link: (rooms[String(r.no)] || {}).link || '' };
+      const lines = Object.entries(rooms).sort((x, y) => x[0] - y[0]).map(([no, r]) => [no, r.section, r.link].filter(Boolean).join('\t'));
+      const got_nos = new Set(matched.map((r) => r.no));
+      return send(res, 200, {
+        ok: true, boardId: got.boardId, title: got.title, total: rows.length, matched: matched.length, aiUsed: ai.n || 0, aiError: ai.error || '',
+        aiAsked: !!b.useAi && grader.configured(),
+        unmatched: rows.filter((r) => !r.no).map((r) => ({ title: r.title, note: r.note })),
+        missing: roster.filter((x) => !got_nos.has(x.no)).map((x) => ({ no: x.no, name: x.name })),
+        byRule: matched.filter((r) => r.by !== 'AI').length,
+        linksMissing: Object.entries(rooms).filter(([, r]) => !r.link).length,
+        roomsText: lines.join('\n'),
+      });
+    }
+
     if (method === 'GET' && pathname === '/api/teacher/padlet/rooms') {
       const cfg = (store.settings.padlet || {})[query.get('cls') || ''] || { boardId: '', rooms: {} };
       const lines = Object.entries(cfg.rooms || {}).sort((a, b) => a[0] - b[0]).map(([no, r]) => [no, r.section, r.link].filter(Boolean).join('\t'));
