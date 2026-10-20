@@ -148,9 +148,9 @@ function bearer(req) {
 }
 
 let padletLastError = '';   // 마지막 패들렛 오류(교사 화면에서 확인용, 저장하지 않음)
-const demoTries = new Map(); // 참관 체험 제출 횟수(저장하지 않음)
 const presence = new Map(); // sid -> 마지막 접속 시각
 const activity = new Map(); // sid -> { typingAt, draftLen, challengeAt }  (교실 현황판용, 저장하지 않음)
+const demoTries = new Map(); // 참관 체험 제출 횟수(저장하지 않음)
 
 const DEMO = { sid: '참관체험', name: '참관 체험', cls: '참관', no: 0, level: '', demo: true };
 function studentAuth(req) {
@@ -375,7 +375,7 @@ function resultFields(out) {
 }
 
 // 교실 현황판 자료. mask 가 true 이면(참관자) 이름은 성만 남기고, 학생이 쓴 문장은 빼고 준다.
-function boardData(cls, mask) {
+async function boardData(cls, mask) {
       const now = Date.now();
       const lastBy = new Map();
       const tally = new Map();
@@ -449,7 +449,7 @@ async function handleApi(req, res, pathname, query) {
   if (method === 'GET' && pathname === '/api/observer/board') {
     observerAuth(req);
     if (!store.settings.observerPassword) throw new HttpError(401, '참관 계정이 닫혔어요.');
-    return send(res, 200, boardData(query.get('cls') || '', true));
+    return send(res, 200, await boardData(query.get('cls') || '', true));
   }
 
   if (method === 'GET' && pathname === '/api/me') {
@@ -787,7 +787,7 @@ async function handleApi(req, res, pathname, query) {
     }
 
     // 교실 현황판: 학생마다 지금 상태(미접속/접속/입력 중/확인 대기/정답/반려)를 한 칸으로 보여 주기 위한 자료
-    if (method === 'GET' && pathname === '/api/teacher/board') return send(res, 200, boardData(query.get('cls') || '', false));
+    if (method === 'GET' && pathname === '/api/teacher/board') return send(res, 200, await boardData(query.get('cls') || '', false));
 
     // 현황판 자리 배치 저장(PC와 태블릿이 같은 배치를 본다)
     if (method === 'PUT' && pathname === '/api/teacher/seats') {

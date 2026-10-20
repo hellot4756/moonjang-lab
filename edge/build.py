@@ -93,7 +93,7 @@ s = sub(s, """    const a = activity.get(st.sid) || { typingAt: 0, draftLen: 0, 
     a.draftLen = n; a.typingAt = n > 0 ? Date.now() : 0;
     activity.set(st.sid, a);""", """    store.setActivity(st.sid, { draft_len: n, typing_at: n > 0 ? Date.now() : 0 });""")
 s = sub(s, "{ const a = activity.get(st.sid); if (a) { a.typingAt = 0; a.draftLen = 0; } }", "store.setActivity(st.sid, { typing_at: 0, draft_len: 0 });")
-s = sub(s, "      const cls = query.get('cls') || '';\n      const now = Date.now();\n      const lastBy", "      const cls = query.get('cls') || '';\n      const { presence, activity } = await store.loadActivity();\n      const now = Date.now();\n      const lastBy")
+s = sub(s, "      const now = Date.now();\n      const lastBy", "      const { presence, activity } = await store.loadActivity();\n      const now = Date.now();\n      const lastBy")
 s = sub(s, "      const sm = statsMap(since);\n      const now = Date.now();\n      const classes = {};", "      const sm = statsMap(since);\n      const { presence } = await store.loadActivity();\n      const now = Date.now();\n      const classes = {};")
 # 4) 패들렛 오류 표시는 데이터베이스에 저장
 s = sub(s, "padletLastError = `${new Date().toLocaleTimeString('ko-KR')} ${st.cls} ${st.no}번: ${out.status || '연결 실패'} ${out.detail || ''}`.slice(0, 300);\n      console.log('[패들렛 오류]', padletLastError);",
