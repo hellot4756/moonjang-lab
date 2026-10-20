@@ -31,7 +31,7 @@
     try {
       sessionStorage.setItem(KEY, JSON.stringify({
         token: S.token, student: S.student, challenge: S.challenge, attempts: S.attempts,
-        last: S.last, draft: S.draft, topicText: S.topicText, flagged: S.flagged, pstate: S.pstate, showPoster: S.showPoster,
+        last: S.last, demo: S.demo, draft: S.draft, topicText: S.topicText, flagged: S.flagged, pstate: S.pstate, showPoster: S.showPoster,
       }));
     } catch (e) { /* 저장소를 쓸 수 없어도 동작한다 */ }
   }
@@ -116,7 +116,7 @@
   async function enter() {
     try {
       const me = await api('/api/me');
-      S.student = me.student; S.stats = me.stats; S.history = me.history; S.posterOn = !!me.poster; S.padletTemplate = me.padletTemplate || ''; S.padlet = me.padlet || { post: false, link: '' };
+      S.demo = !!me.demo; S.student = me.student; S.stats = me.stats; S.history = me.history; S.posterOn = !!me.poster; S.padletTemplate = me.padletTemplate || ''; S.padlet = me.padlet || { post: false, link: '' };
     } catch (e) { render(); return; }
     if (!S.challenge) await newChallenge(false);
     save();
@@ -559,9 +559,10 @@
     const st = S.student;
     const top = h('div', { class: 'top' },
       h('div', { class: 'brand' }, h('span', { class: 'stampbox sm' }, '제2막'), '문장 연습실', h('small', null, `문법광인의 서재 · 누적 ${S.stats.correct}/${S.stats.tries}`)),
-      h('div', { class: 'chip' }, `${st.cls} ${st.name}`, h('button', { class: 'btn sm', type: 'button', onclick: () => logout(false) }, '나가기')));
+      h('div', { class: 'chip' }, `${st.cls} ${st.name}`, h('button', { class: 'btn sm', type: 'button', onclick: () => { if (S.demo) { logout(false); location.href = 'observer.html'; } else logout(false); } }, S.demo ? '참관 화면으로' : '나가기')));
 
     const nodes = [top];
+    if (S.demo) nodes.push(h('div', { class: 'notice ok', role: 'note' }, h('b', null, '참관 체험 중이에요. '), '여기서 제출한 문장과 기록은 저장되지 않고, 실제 수업(교사 화면·현황판·패들렛)에는 아무 영향이 없어요.'));
     const fbCount = S.history.filter((x) => x.tfeedback).length;
     nodes.push(h('div', { class: 'actions', style: 'margin-top:0' }, h('button', { class: 'btn', type: 'button', onclick: toggleHist }, S.showHist ? '내 기록 닫기' : '내 기록 보기' + (fbCount ? ` (선생님 피드백 ${fbCount})` : ''))));
     if (S.showHist) nodes.push(histCard());

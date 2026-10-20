@@ -148,16 +148,27 @@ function bearer(req) {
 }
 
 let padletLastError = '';   // 마지막 패들렛 오류(교사 화면에서 확인용, 저장하지 않음)
+const demoTries = new Map(); // 참관 체험 제출 횟수(저장하지 않음)
 const presence = new Map(); // sid -> 마지막 접속 시각
 const activity = new Map(); // sid -> { typingAt, draftLen, challengeAt }  (교실 현황판용, 저장하지 않음)
 
+const DEMO = { sid: '참관체험', name: '참관 체험', cls: '참관', no: 0, level: '', demo: true };
 function studentAuth(req) {
   const p = verify(bearer(req));
+  if (p && p.r === 'o') {
+    if (!store.settings.observerPassword) throw new HttpError(401, '참관 계정이 닫혔어요.');
+    return DEMO;
+  }   // 참관자의 학생 화면 체험: 기록·현황판에 남기지 않는다
   if (!p || p.r !== 's') throw new HttpError(401, '다시 입장해 주세요.');
   const st = store.studentBySid(p.sid);
   if (!st) throw new HttpError(401, '명단에서 찾을 수 없어요. 다시 입장해 주세요.');
   presence.set(st.sid, Date.now());
   return st;
+}
+
+function observerAuth(req) {
+  const p = verify(bearer(req));
+  if (!p || p.r !== 'o') throw new HttpError(401, '참관 비밀번호로 다시 들어와 주세요.');
 }
 
 function teacherAuth(req) {
@@ -307,6 +318,7 @@ function teacherInfo() {
       aiMode: store.settings.aiMode === 'off' ? 'off' : 'on',
       poster: store.settings.poster !== false,
       topicChoice: store.settings.topicChoice !== false,
+      observerPassword: store.settings.observerPassword || '',
       padletTemplate: store.settings.padletTemplate || '',
       padlet: {
         keySet: !!store.settings.padletApiKey, keyHint: maskKey(store.settings.padletApiKey || ''), lastError: padletLastError,
@@ -362,6 +374,48 @@ function resultFields(out) {
   };
 }
 
+// 교실 현황판 자료. mask 가 true 이면(참관자) 이름은 성만 남기고, 학생이 쓴 문장은 빼고 준다.
+function boardData(cls, mask) {
+      const now = Date.now();
+      const lastBy = new Map();
+      const tally = new Map();
+      for (let i = store.records.length - 1; i >= 0; i--) {
+        const r = store.records[i];
+        if (!lastBy.has(r.sid)) lastBy.set(r.sid, r);
+        const t = tally.get(r.sid) || { tries: 0, correct: 0 };
+        t.tries++; if (finalVerdict(r) === 'correct') t.correct++;
+        tally.set(r.sid, t);
+      }
+      const classes = {};
+      const students = [];
+      for (const s of store.students) {
+        classes[s.cls] = (classes[s.cls] || 0) + 1;
+        if (cls && s.cls !== cls) continue;
+        const online = (presence.get(s.sid) || 0) > now - 5 * 60 * 1000;
+        const a = activity.get(s.sid) || {};
+        const last = lastBy.get(s.sid);
+        const typing = !!a.typingAt && now - a.typingAt < 15000 && a.draftLen > 0 && (!last || a.typingAt > last.ts);
+        const current = !!last && now - last.ts < 8 * 3600 * 1000 && (!a.challengeAt || a.challengeAt <= last.ts);
+        let state = 'offline';
+        if (typing) state = 'typing';
+        else if (current) { const v = finalVerdict(last); state = v === 'correct' ? 'correct' : v === 'incorrect' ? 'incorrect' : 'pending'; }
+        else if (online) state = 'waiting';
+        const t = tally.get(s.sid) || { tries: 0, correct: 0 };
+        students.push({
+          sid: s.sid, name: s.name, cls: s.cls, no: s.no, level: s.level || '', online, state,
+          attempt: current ? last.attempt : 0, draftLen: typing ? a.draftLen : 0,
+          manual: current && !!last.manual, review: current && needsReview(last), topicTodo: current && topicTodo(last),
+          sentence: current ? last.sentence : '', ago: current ? Math.max(0, Math.round((now - last.ts) / 1000)) : -1,
+          tries: t.tries, correct: t.correct,
+        });
+      }
+  if (mask) for (const x of students) { x.name = (x.name || '').slice(0, 1) + '○'.repeat(Math.max(0, (x.name || '').length - 1)); x.sentence = ''; x.level = ''; }
+  return {
+    students, seats: store.seats, cols: SEAT_COLS,
+    classes: Object.keys(classes).sort((a, b) => a.localeCompare(b, 'ko', { numeric: true })).map((c) => ({ cls: c, count: classes[c] })),
+  };
+}
+
 // ---------- 라우트 ----------
 async function handleApi(req, res, pathname, query) {
   const ip = req.socket.remoteAddress || '';
@@ -381,9 +435,27 @@ async function handleApi(req, res, pathname, query) {
     });
   }
 
+  // ----- 참관자(수업 참관용 공용 비밀번호; 여러 명이 동시에 쓸 수 있다) -----
+  if (method === 'POST' && pathname === '/api/observer/login') {
+    if (rateLimited('ologin:' + ip, 20, 60 * 1000)) throw new HttpError(429, '잠시 후 다시 시도해 주세요.');
+    const b = await readBody(req, 1024);
+    const pw = store.settings.observerPassword || '';
+    if (!pw) throw new HttpError(403, '참관 계정이 아직 열려 있지 않아요. 선생님께 문의해 주세요.');
+    const a = crypto.createHash('sha256').update(String(b.password || '')).digest();
+    const c = crypto.createHash('sha256').update(pw).digest();
+    if (!crypto.timingSafeEqual(a, c)) throw new HttpError(401, '참관 비밀번호가 맞지 않아요.');
+    return send(res, 200, { token: sign({ r: 'o', exp: Date.now() + 8 * HOUR }) });
+  }
+  if (method === 'GET' && pathname === '/api/observer/board') {
+    observerAuth(req);
+    if (!store.settings.observerPassword) throw new HttpError(401, '참관 계정이 닫혔어요.');
+    return send(res, 200, boardData(query.get('cls') || '', true));
+  }
+
   if (method === 'GET' && pathname === '/api/me') {
     const st = studentAuth(req);
     const sm = statsMap(0).get(st.sid) || { tries: 0, correct: 0 };
+    if (st.demo && !store.settings.observerPassword) throw new HttpError(401, '참관 계정이 닫혔어요.');
     return send(res, 200, {
       student: { sid: st.sid, name: st.name, cls: st.cls, no: st.no },
       stats: { tries: sm.tries, correct: sm.correct },
@@ -392,19 +464,20 @@ async function handleApi(req, res, pathname, query) {
       poster: store.settings.poster !== false,
       topicChoice: store.settings.topicChoice !== false,
       padletTemplate: store.settings.padletTemplate || '',
-      padlet: padletFor(st),
+      padlet: st.demo ? { post: true, link: '', board: false, demo: true } : padletFor(st),
+      demo: !!st.demo,
     });
   }
 
   if (method === 'POST' && pathname === '/api/challenge') {
     const st = studentAuth(req);
-    if (!store.settings.open) throw new HttpError(403, '지금은 수업이 닫혀 있어요.');
+    if (!st.demo && !store.settings.open) throw new HttpError(403, '지금은 수업이 닫혀 있어요.');
     // 학생별 난이도: 하 → 짜임은 쉬운 것만, 성분 개수는 가장 적게 / 상 → 기본 조건만, 성분 개수는 가장 많게
     const own = st.level === 'easy' || st.level === 'basic' ? st.level : '';
     const ids = C.draw(own || store.settings.level, rnd, recentConditions(st.sid), own === 'easy' ? 'min' : own === 'basic' ? 'max' : '');
     const resolved = C.resolve(ids);
     const token = sign({ r: 'c', sid: st.sid, ids, n: store.newId(), exp: Date.now() + 4 * HOUR });
-    activity.set(st.sid, { typingAt: 0, draftLen: 0, challengeAt: Date.now() });
+    if (!st.demo) activity.set(st.sid, { typingAt: 0, draftLen: 0, challengeAt: Date.now() });
     const choice = store.settings.topicChoice !== false;
     return send(res, 200, {
       token, conditions: C.publicView(resolved),
@@ -416,6 +489,7 @@ async function handleApi(req, res, pathname, query) {
   // 학생이 문장을 쓰고 있는지(현황판의 '입력 중') 알려 주는 신호. 글 내용은 보내지 않고 글자 수만 보낸다.
   if (method === 'POST' && pathname === '/api/typing') {
     const st = studentAuth(req);
+    if (st.demo) return send(res, 200, { ok: true });
     const b = await readBody(req, 512);
     const n = Math.max(0, Math.min(1000, parseInt(b.n, 10) || 0));
     if (rateLimited('typing:' + st.sid, 30, 60 * 1000)) return send(res, 200, { ok: true });
@@ -428,6 +502,7 @@ async function handleApi(req, res, pathname, query) {
   // 학생의 광고문구를 그 학생 번호의 패들렛 섹션(소회의실)에 글로 올린다. 올릴 곳은 서버가 번호로 정하고, 글도 서버의 기록으로 만든다.
   if (method === 'POST' && pathname === '/api/padlet/post') {
     const st = studentAuth(req);
+    if (st.demo) return send(res, 200, { ok: true, at: Date.now(), link: '', demo: true });
     const b = await readBody(req, 4096);
     const { cfg, room } = padletRoom(st);
     if (!store.settings.padletApiKey || !cfg || !cfg.boardId || !room || !room.section) throw new HttpError(400, '내 패들렛 방이 아직 연결되지 않았어요. 선생님께 알려 주세요.');
@@ -452,7 +527,7 @@ async function handleApi(req, res, pathname, query) {
 
   if (method === 'POST' && pathname === '/api/submit') {
     const st = studentAuth(req);
-    if (!store.settings.open) throw new HttpError(403, '지금은 수업이 닫혀 있어요.');
+    if (!st.demo && !store.settings.open) throw new HttpError(403, '지금은 수업이 닫혀 있어요.');
     const b = await readBody(req, 8192);
     const ch = verify(b.token);
     if (!ch || ch.r !== 'c' || ch.sid !== st.sid) throw new HttpError(410, '조건이 만료되었어요. 새 조건을 받아 주세요.');
@@ -464,8 +539,8 @@ async function handleApi(req, res, pathname, query) {
     if (sentence.length > 200) throw new HttpError(400, '200자 이내의 한 문장으로 써 주세요.');
     if (!/[가-힣]/.test(sentence)) throw new HttpError(400, '한글로 문장을 써 주세요.');
 
-    if (rateLimited('submit:' + st.sid, 12, 60 * 1000)) throw new HttpError(429, '너무 빨리 제출하고 있어요. 잠시 뒤에 다시 제출해 주세요.');
-    const attempt = store.records.filter((r) => r.cid === ch.n && r.sid === st.sid).length + 1;
+    if (rateLimited('submit:' + (st.demo ? 'demo:' + ip : st.sid), st.demo ? 20 : 12, 60 * 1000)) throw new HttpError(429, '너무 빨리 제출하고 있어요. 잠시 뒤에 다시 제출해 주세요.');
+    const attempt = st.demo ? (demoTries.set(ch.n, (demoTries.get(ch.n) || 0) + 1), demoTries.get(ch.n)) : store.records.filter((r) => r.cid === ch.n && r.sid === st.sid).length + 1;
     if (attempt > 25) throw new HttpError(429, '이 조건으로는 충분히 도전했어요. 새 조건을 받아 주세요.');
 
     // 학생이 목록에서 고른 주제(선생님이 허용한 경우). 주제는 채점하지 않고 기록과 예시 문장에만 쓴다.
@@ -474,12 +549,12 @@ async function handleApi(req, res, pathname, query) {
     const topicLabel = topicText || resolved.topic.label;
     const topicCustom = !!topicText && topicText !== resolved.topic.label;
     const gradeInput = topicCustom ? Object.assign({}, resolved, { topic: { id: 'custom:' + topicText, label: topicText } }) : resolved;
-    const manual = store.settings.aiMode === 'off';
+    const manual = !st.demo && store.settings.aiMode === 'off';
     const out = manual ? { ok: false, code: 'manual', message: '' } : await grader.grade(gradeInput, sentence);
     const fields = resultFields(out);
     if (manual) { fields.pendingReason = ''; fields.manual = true; }
     { const a = activity.get(st.sid); if (a) { a.typingAt = 0; a.draftLen = 0; } }
-    const rec = store.addRecord(Object.assign({
+    const rec = st.demo ? { id: 'demo-' + ch.n + '-' + attempt } : store.addRecord(Object.assign({
       ts: Date.now(), sid: st.sid, name: st.name, cls: st.cls, cid: ch.n, attempt,
       comp: ch.ids.comp, struct: ch.ids.struct, topic: ch.ids.topic,
       compLabel: resolved.comp.label, structLabel: resolved.struct.label, topicLabel, topicCustom,
@@ -506,6 +581,7 @@ async function handleApi(req, res, pathname, query) {
   // 학생이 만든 포스터 프롬프트를 선생님이 볼 수 있게 저장한다.
   if (method === 'POST' && pathname === '/api/poster') {
     const st = studentAuth(req);
+    if (st.demo) return send(res, 200, { id: 'demo' });
     if (store.settings.poster === false) throw new HttpError(403, '지금은 포스터 프롬프트 만들기가 닫혀 있어요.');
     if (rateLimited('poster:' + st.sid, 20, 60 * 1000)) throw new HttpError(429, '너무 빨리 만들고 있어요. 잠시 뒤에 다시 해 주세요.');
     const b = await readBody(req, 32 * 1024);
@@ -525,6 +601,7 @@ async function handleApi(req, res, pathname, query) {
 
   if (method === 'POST' && pathname === '/api/flag') {
     const st = studentAuth(req);
+    if (st.demo) return send(res, 200, { ok: true });
     const b = await readBody(req, 2048);
     const rec = store.getRecord(String(b.id || ''));
     if (!rec || rec.sid !== st.sid) throw new HttpError(404, '기록을 찾을 수 없어요.');
@@ -557,6 +634,7 @@ async function handleApi(req, res, pathname, query) {
       if (b.poster !== undefined) patch.poster = !!b.poster;
       if (b.topicChoice !== undefined) patch.topicChoice = !!b.topicChoice;
       if (typeof b.padletTemplate === 'string') patch.padletTemplate = b.padletTemplate;
+      if (typeof b.observerPassword === 'string') patch.observerPassword = b.observerPassword;
       if (typeof b.apiKey === 'string' && b.apiKey.trim()) patch.apiKey = b.apiKey;
       if (b.clearApiKey) patch.apiKey = '';
       if (typeof b.model === 'string') patch.model = b.model;
@@ -709,46 +787,7 @@ async function handleApi(req, res, pathname, query) {
     }
 
     // 교실 현황판: 학생마다 지금 상태(미접속/접속/입력 중/확인 대기/정답/반려)를 한 칸으로 보여 주기 위한 자료
-    if (method === 'GET' && pathname === '/api/teacher/board') {
-      const cls = query.get('cls') || '';
-      const now = Date.now();
-      const lastBy = new Map();
-      const tally = new Map();
-      for (let i = store.records.length - 1; i >= 0; i--) {
-        const r = store.records[i];
-        if (!lastBy.has(r.sid)) lastBy.set(r.sid, r);
-        const t = tally.get(r.sid) || { tries: 0, correct: 0 };
-        t.tries++; if (finalVerdict(r) === 'correct') t.correct++;
-        tally.set(r.sid, t);
-      }
-      const classes = {};
-      const students = [];
-      for (const s of store.students) {
-        classes[s.cls] = (classes[s.cls] || 0) + 1;
-        if (cls && s.cls !== cls) continue;
-        const online = (presence.get(s.sid) || 0) > now - 5 * 60 * 1000;
-        const a = activity.get(s.sid) || {};
-        const last = lastBy.get(s.sid);
-        const typing = !!a.typingAt && now - a.typingAt < 15000 && a.draftLen > 0 && (!last || a.typingAt > last.ts);
-        const current = !!last && now - last.ts < 8 * 3600 * 1000 && (!a.challengeAt || a.challengeAt <= last.ts);
-        let state = 'offline';
-        if (typing) state = 'typing';
-        else if (current) { const v = finalVerdict(last); state = v === 'correct' ? 'correct' : v === 'incorrect' ? 'incorrect' : 'pending'; }
-        else if (online) state = 'waiting';
-        const t = tally.get(s.sid) || { tries: 0, correct: 0 };
-        students.push({
-          sid: s.sid, name: s.name, cls: s.cls, no: s.no, level: s.level || '', online, state,
-          attempt: current ? last.attempt : 0, draftLen: typing ? a.draftLen : 0,
-          manual: current && !!last.manual, review: current && needsReview(last), topicTodo: current && topicTodo(last),
-          sentence: current ? last.sentence : '', ago: current ? Math.max(0, Math.round((now - last.ts) / 1000)) : -1,
-          tries: t.tries, correct: t.correct,
-        });
-      }
-      return send(res, 200, {
-        students, seats: store.seats, cols: SEAT_COLS,
-        classes: Object.keys(classes).sort((a, b) => a.localeCompare(b, 'ko', { numeric: true })).map((c) => ({ cls: c, count: classes[c] })),
-      });
-    }
+    if (method === 'GET' && pathname === '/api/teacher/board') return send(res, 200, boardData(query.get('cls') || '', false));
 
     // 현황판 자리 배치 저장(PC와 태블릿이 같은 배치를 본다)
     if (method === 'PUT' && pathname === '/api/teacher/seats') {

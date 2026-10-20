@@ -1077,9 +1077,22 @@
     };
     api('/api/teacher/conditions').then(buildTry).catch((e) => tryBox.replaceChildren(h('div', { class: 'notice bad' }, e.message)));
 
+    // 수업 참관용 계정: 공용 비밀번호 하나로 여러 명이 동시에 들어올 수 있다
+    const opw = h('input', { type: 'text', id: 'opw', autocomplete: 'off', placeholder: '비워 두면 참관 계정이 꺼져요', value: info.settings.observerPassword || '' });
+    const oUrl = new URL('observer.html', window.ML_API ? new URL('./', location.href).href : location.origin + '/').href;
+    const obsSave = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
+      try { T.info = await api('/api/teacher/settings', { observerPassword: opw.value.trim() }, 'PUT'); toast(opw.value.trim() ? '참관 계정을 열었어요.' : '참관 계정을 껐어요.'); } catch (e) { toast(e.message, true); }
+    } }, '저장');
+    const obsCard = h('section', { class: 'card' }, h('h2', null, '수업 참관용 계정'),
+      h('div', { class: 'wrap', style: 'max-width:520px' },
+        h('p', { class: 'muted small' }, '참관 선생님께 아래 주소와 비밀번호를 알려 주세요. 같은 비밀번호로 여러 명이 동시에 들어올 수 있어요. 참관자는 ① 학생 이름을 가린 현황판을 읽기만 할 수 있고 ② 학생 화면을 체험할 수 있어요. 체험한 문장은 어디에도 저장되지 않고 수업에 영향을 주지 않아요.'),
+        h('div', { class: 'url' }, oUrl),
+        h('label', { class: 'field', for: 'opw' }, '참관 비밀번호', opw),
+        h('div', { class: 'toolbar' }, obsSave)));
+
     const dataCard = h('section', { class: 'card' }, h('h2', null, '자료 보관'),
       h('p', { class: 'muted' }, '명단과 모든 제출 기록은 프로그램 폴더 안의 data 폴더에 저장돼요. 이 폴더를 복사해 두면 백업이 되고, 새 컴퓨터로 옮길 때도 그대로 쓸 수 있어요.'));
-    body.append(...[h('div', { class: 'two' }, classCard, modeCard), info.settings.aiMode === 'off' ? h('p', { class: 'muted small' }, 'AI 없이 선생님이 직접 판정하는 방식이라 아래 AI 연결과 판정 시험은 사용하지 않아요.') : null, h('div', { class: 'two' }, aiCard, padCard), padletCard, tryBox, dataCard].filter(Boolean));
+    body.append(...[h('div', { class: 'two' }, classCard, modeCard), info.settings.aiMode === 'off' ? h('p', { class: 'muted small' }, 'AI 없이 선생님이 직접 판정하는 방식이라 아래 AI 연결과 판정 시험은 사용하지 않아요.') : null, h('div', { class: 'two' }, aiCard, padCard), padletCard, obsCard, tryBox, dataCard].filter(Boolean));
   }
 
   if (T.token) start().then(() => { if (!T.info) renderLogin(); }); else renderLogin();
