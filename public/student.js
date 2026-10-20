@@ -245,9 +245,9 @@
         h('div', { class: 'chips', style: 'margin:6px 0' }, tabBtn('ko', '한국어'), tabBtn('en', 'English')),
         ta,
         h('div', { class: 'actions', style: 'align-items:center' }, copyBtn, room, doneBtn, msg),
-        allLink,
         !hasRoom ? h('p', { class: 'muted small' }, '내 패들렛 방 주소가 아직 등록되지 않았어요. 선생님이 안내한 패들렛 방으로 직접 이동해 주세요.') : null,
-        h('p', { class: 'muted small' }, '복사한 글을 선생님이 안내한 이미지 만들기 도구에 붙여 넣어 보세요. 마음에 안 들면 위의 선택을 바꾸고 [프롬프트 만들기]를 다시 눌러요.')));
+        h('p', { class: 'muted small' }, '복사한 글을 선생님이 안내한 이미지 만들기 도구에 붙여 넣어 보세요. 마음에 안 들면 위의 선택을 바꾸고 [프롬프트 만들기]를 다시 눌러요.'),
+        allLink));
     }
     box.replaceChildren(...kids.flat());
   }
