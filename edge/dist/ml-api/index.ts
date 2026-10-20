@@ -732,10 +732,10 @@ class Grader {
     const t0 = Date.now();
     let lastErr = null;
     for (let i = 0; i < delays.length; i++) {
-      if (i > 0 && Date.now() - t0 > 45000) break;   // 학생을 너무 오래 기다리게 하지 않는다
+      if (i > 0 && Date.now() - t0 > 22000) break;   // 학생을 너무 오래 기다리게 하지 않는다
       if (delays[i]) await sleep(delays[i]);
       const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), 35000);
+      const timer = setTimeout(() => ctl.abort(), 20000);
       try {
         const res = await fetch(url, {
           method: 'POST',
