@@ -455,9 +455,9 @@ class Store {
     if (typeof patch.topicChoice === 'boolean') s.topicChoice = patch.topicChoice;
     if (typeof patch.padletApiKey === 'string') s.padletApiKey = patch.padletApiKey.trim().slice(0, 300);
     if (patch.padletClass && typeof patch.padletClass === 'object') {
-      const { cls, boardId, rooms, boardUrl } = patch.padletClass;
+      const { cls, boardId, rooms, boardUrl, allUrl } = patch.padletClass;
       if (!s.padlet || typeof s.padlet !== 'object') s.padlet = {};
-      if (boardId || Object.keys(rooms || {}).length) s.padlet[cls] = { boardId: boardId || '', rooms: rooms || {}, boardUrl: boardUrl || '' }; else delete s.padlet[cls];
+      if (boardId || Object.keys(rooms || {}).length || allUrl) s.padlet[cls] = { boardId: boardId || '', rooms: rooms || {}, boardUrl: boardUrl || '', allUrl: allUrl || '' }; else delete s.padlet[cls];
     }
     if (typeof patch.observerPassword === 'string') s.observerPassword = patch.observerPassword.trim().slice(0, 40);
     if (typeof patch.padletTemplate === 'string') s.padletTemplate = patch.padletTemplate.replace(/\r/g, '').slice(0, 1000);
@@ -1443,6 +1443,7 @@ function padletFor(st) {
   return {
     post: !!(store.settings.padletApiKey && cfg && cfg.boardId && room && room.section),
     link: (room && room.link) || (cfg && cfg.boardUrl) || '',
+    all: (cfg && cfg.allUrl) || '',   // 모든 친구의 결과물을 볼 수 있는 반별 전체 링크(③ 업로드 완료 버튼을 누르면 보인다)
     board: !(room && room.link) && !!(cfg && cfg.boardUrl),   // 개인 방 링크가 없어 보드 전체 주소로 대신하는 경우
   };
 }
@@ -1837,7 +1838,9 @@ async function handleApi(req, res, pathname, query) {
         skipped = parsed.skipped;
         const bu = String(b.boardUrl || '').trim();
         if (bu && !PADLET.LINK_RE.test(bu)) throw new HttpError(400, '패들렛 주소는 https://padlet.com/ 으로 시작해야 해요.');
-        patch.padletClass = { cls, boardId, rooms: parsed.rooms, boardUrl: bu };
+        const au = String(b.allUrl || '').trim();
+        if (au && !PADLET.LINK_RE.test(au)) throw new HttpError(400, '전체 보기 링크는 https://padlet.com/ 으로 시작해야 해요.');
+        patch.padletClass = { cls, boardId, rooms: parsed.rooms, boardUrl: bu, allUrl: au };
       }
       store.updateSettings(patch);
       return send(res, 200, Object.assign(teacherInfo(), { skipped }));
@@ -1884,7 +1887,7 @@ async function handleApi(req, res, pathname, query) {
     if (method === 'GET' && pathname === '/api/teacher/padlet/rooms') {
       const cfg = (store.settings.padlet || {})[query.get('cls') || ''] || { boardId: '', rooms: {} };
       const lines = Object.entries(cfg.rooms || {}).sort((a, b) => a[0] - b[0]).map(([no, r]) => [no, r.section, r.link].filter(Boolean).join('\t'));
-      return send(res, 200, { boardId: cfg.boardId || '', boardUrl: cfg.boardUrl || '', roomsText: lines.join('\n') });
+      return send(res, 200, { boardId: cfg.boardId || '', boardUrl: cfg.boardUrl || '', allUrl: cfg.allUrl || '', roomsText: lines.join('\n') });
     }
     if (method === 'POST' && pathname === '/api/teacher/ping') {
       const out = await grader.ping();

@@ -494,3 +494,4 @@ body.is-gate { background: linear-gradient(180deg, #18232e 0%, #223445 60%, #162
 /* 입실 등록: 입력 칸 글씨는 남색으로 (흰 칸 위에서 또렷하게) */
 .gate-leaf.right input[type=text], .gate-leaf.right input[type=password], .gate-leaf.right input[type=number] { color: #16263f; font-weight: 600; caret-color: #16263f; }
 .gate-leaf.right input::placeholder { color: #6a7a90; opacity: 1; font-weight: 400; }
+.btn.small { padding: 5px 12px; min-height: 0; font-size: .84rem; }

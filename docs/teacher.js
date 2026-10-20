@@ -927,6 +927,7 @@
     const pboard = h('input', { type: 'text', id: 'pboard', autocomplete: 'off', placeholder: '위에서 주소를 불러오면 자동으로 채워져요' });
     const prooms = h('textarea', { id: 'prooms', rows: '8', style: 'font-family:ui-monospace,Consolas,monospace;font-size:.85rem', placeholder: '번호  섹션ID(sec_…)  소회의실 링크(https://padlet.com/…)\n1  sec_AbCd…  https://padlet.com/…/breakout-room/…' });
     const purl = h('input', { type: 'text', id: 'purl', autocomplete: 'off', placeholder: '예: https://padlet.com/내아이디/제목-abcd1234efgh5678' });
+    const pall = h('input', { type: 'text', id: 'pall', autocomplete: 'off', placeholder: '예: https://padlet.com/내아이디/제목-abcd1234efgh5678' });
     const puseAi = h('input', { type: 'checkbox', id: 'puseai', checked: true });
     const pres = h('div', { hidden: true, class: 'small' });
     const pimport = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
@@ -955,14 +956,14 @@
     };
     api('/api/teacher/overview').then((o) => { for (const c of o.classes) pcls.append(h('option', { value: c.cls }, `${c.cls} (${c.count}명)`)); }).catch(() => {});
     pcls.addEventListener('change', async () => {
-      pboard.value = ''; prooms.value = ''; purl.value = ''; refreshStat();
+      pboard.value = ''; prooms.value = ''; purl.value = ''; pall.value = ''; refreshStat();
       if (!pcls.value) return;
-      try { const r = await api('/api/teacher/padlet/rooms?' + qs({ cls: pcls.value })); pboard.value = r.boardId; prooms.value = r.roomsText; purl.value = r.boardUrl || ''; } catch (e) { pshow(e.message, 'bad'); }
+      try { const r = await api('/api/teacher/padlet/rooms?' + qs({ cls: pcls.value })); pboard.value = r.boardId; prooms.value = r.roomsText; purl.value = r.boardUrl || ''; pall.value = r.allUrl || ''; } catch (e) { pshow(e.message, 'bad'); }
     });
     const psave = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
       try {
         const b = {}; if (pkey.value.trim()) b.apiKey = pkey.value;
-        if (pcls.value) { b.cls = pcls.value; b.boardId = pboard.value; b.roomsText = prooms.value; b.boardUrl = /^https:\/\/padlet\.com\//.test(purl.value.trim()) ? purl.value.trim() : ''; }
+        if (pcls.value) { b.cls = pcls.value; b.boardId = pboard.value; b.roomsText = prooms.value; b.boardUrl = /^https:\/\/padlet\.com\//.test(purl.value.trim()) ? purl.value.trim() : ''; b.allUrl = /^https:\/\/padlet\.com\//.test(pall.value.trim()) ? pall.value.trim() : ''; }
         if (!Object.keys(b).length) { pshow('저장할 내용이 없어요.', 'bad'); return; }
         const o = await api('/api/teacher/padlet', b, 'PUT'); T.info = o; pkey.value = '';
         pshow('저장했어요.' + (o.skipped && o.skipped.length ? ` 읽지 못한 줄 ${o.skipped.length}개: ${o.skipped.slice(0, 3).join(' | ')}` : ''), 'ok'); refreshStat();
@@ -985,6 +986,7 @@
         h('label', { class: 'field', for: 'pkey' }, 'Padlet API 키', pkey),
         h('label', { class: 'field', for: 'pcls' }, '반', pcls),
         h('label', { class: 'field', for: 'purl' }, '패들렛 주소 (보드 주소를 복사해 붙여 넣으세요. 저장하면 학생의 [방 열기] 버튼이 이 주소로 가요. 번호별 소회의실 링크를 따로 넣으면 그 링크가 우선이에요)', purl),
+        h('label', { class: 'field', for: 'pall' }, '모두의 결과물 보기 링크 (이 반 학생이 [③ 포스터 업로드 완료]를 누르면 [다른 친구들 포스터 보러가기] 버튼이 나타나요. 비워 두면 ③ 버튼이 안 보여요)', pall),
         h('label', { class: 'check-line' }, puseAi, ' 규칙으로 못 읽은 섹션 제목은 AI에게 번호를 물어보기 (제목만 보내고 학생 이름·명단은 보내지 않아요)'),
         h('div', { class: 'toolbar' }, pimport), pres,
         h('label', { class: 'field', for: 'pboard' }, '보드 ID', pboard),

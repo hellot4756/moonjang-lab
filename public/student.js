@@ -233,11 +233,19 @@
         if (ok && room) { copyBtn.classList.remove('primary'); room.classList.add('primary'); }
       });
       if (room) room.prepend('② ');
+      // ③ 포스터 업로드 완료: 누르면 숨겨 둔 [다른 친구들 포스터 보러가기] 링크가 나타난다(반별 전체 링크가 설정된 경우만)
+      const allUrl = (S.padlet && S.padlet.all) || '';
+      const allLink = allUrl ? h('div', { id: 'pp-all', class: 'actions', style: 'margin-top:8px', hidden: !PS.done },
+        h('a', { class: 'btn primary', href: allUrl, target: '_blank', rel: 'noopener' }, '다른 친구들 포스터 보러가기 →')) : null;
+      const doneBtn = allUrl ? h('button', { class: 'btn small', type: 'button', style: 'margin-left:auto', 'aria-expanded': String(!!PS.done), onclick: () => {
+        PS.done = true; save(); const a = document.getElementById('pp-all'); if (a) a.hidden = false; doneBtn.setAttribute('aria-expanded', 'true');
+      } }, '③ 포스터 업로드 완료') : null;
       kids.push(h('div', { id: 'pp-out', class: 'block', style: 'margin-top:14px' },
         h('div', { class: 'ttl' }, '완성된 프롬프트'),
         h('div', { class: 'chips', style: 'margin:6px 0' }, tabBtn('ko', '한국어'), tabBtn('en', 'English')),
         ta,
-        h('div', { class: 'actions' }, copyBtn, room, msg),
+        h('div', { class: 'actions', style: 'align-items:center' }, copyBtn, room, doneBtn, msg),
+        allLink,
         !hasRoom ? h('p', { class: 'muted small' }, '내 패들렛 방 주소가 아직 등록되지 않았어요. 선생님이 안내한 패들렛 방으로 직접 이동해 주세요.') : null,
         h('p', { class: 'muted small' }, '복사한 글을 선생님이 안내한 이미지 만들기 도구에 붙여 넣어 보세요. 마음에 안 들면 위의 선택을 바꾸고 [프롬프트 만들기]를 다시 눌러요.')));
     }
