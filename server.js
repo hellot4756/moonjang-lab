@@ -471,6 +471,7 @@ async function handleApi(req, res, pathname, query) {
       open: store.settings.open,
       poster: store.settings.poster !== false,
       topicChoice: store.settings.topicChoice !== false,
+      topicList: store.settings.topicChoice !== false ? C.snapshot().topics.filter((x) => !x.off).map((x) => x.label) : [],
       padletTemplate: store.settings.padletTemplate || '',
       padlet: st.demo ? { post: true, link: '', board: false, demo: true } : padletFor(st),
       demo: !!st.demo,

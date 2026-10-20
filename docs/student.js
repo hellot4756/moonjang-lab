@@ -117,6 +117,10 @@
     try {
       const me = await api('/api/me');
       S.demo = !!me.demo; S.student = me.student; S.stats = me.stats; S.history = me.history; S.posterOn = !!me.poster; S.padletTemplate = me.padletTemplate || ''; S.padlet = me.padlet || { post: false, link: '' };
+      if (S.challenge) {
+        if (me.topicChoice === false) { S.challenge.topicChoice = false; S.topicText = ''; }
+        else if (Array.isArray(me.topicList) && me.topicList.length) { S.challenge.topicChoice = true; S.challenge.topicList = me.topicList; }
+      }
     } catch (e) { render(); return; }
     if (!S.challenge) await newChallenge(false);
     save();
@@ -614,8 +618,12 @@
       const me = await api('/api/me');
       const prevCount = S.history.filter((x) => x.tfeedback).length;
       S.history = me.history; S.stats = me.stats; S.padletTemplate = me.padletTemplate || ''; S.padlet = me.padlet || { post: false, link: '' };
-      if (S.challenge && S.challenge.topicChoice && me.topicChoice === false) {
+      // 선생님이 '주제 바꾸기'를 켜거나 끄면 이미 받은 조건 화면에도 바로 반영한다(켠 경우에는 주제 목록도 함께 받는다)
+      if (S.challenge && me.topicChoice === false && S.challenge.topicChoice) {
         S.challenge.topicChoice = false; S.topicText = ''; save();
+        const typing1 = document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName); if (!typing1) render();
+      } else if (S.challenge && me.topicChoice === true && Array.isArray(me.topicList) && me.topicList.length && !S.challenge.topicChoice) {
+        S.challenge.topicChoice = true; S.challenge.topicList = me.topicList; save();
         const typing1 = document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName); if (!typing1) render();
       }
       if (!!me.poster !== S.posterOn) { S.posterOn = !!me.poster; if (!S.posterOn) S.showPoster = false; const typing0 = document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName); if (!typing0) render(); }
