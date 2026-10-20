@@ -53,8 +53,8 @@ const DEFAULT_GEMINI = 'gemini-3.8-flash';
 
 const store = new Store(DATA_DIR);
 C.init(path.join(DATA_DIR, 'conditions.json'));
-function aiConfig() {
-  const gem = store.settings.provider === 'gemini';
+function aiConfig(which) {
+  const gem = (which || store.settings.provider) === 'gemini';
   return gem ? {
     provider: 'gemini',
     apiKey: store.settings.geminiApiKey || process.env.GEMINI_API_KEY || '',
@@ -67,7 +67,13 @@ function aiConfig() {
     baseUrl: process.env.ANTHROPIC_BASE_URL || '',
   };
 }
-const grader = new Grader(aiConfig);
+// 주 AI가 안 될 때 쓸 예비 AI: 선택하지 않은 쪽 AI에 키가 있으면 그쪽을 쓴다
+function aiFallback() {
+  const other = store.settings.provider === 'gemini' ? 'claude' : 'gemini';
+  const c = aiConfig(other);
+  return c.apiKey ? c : null;
+}
+const grader = new Grader(() => aiConfig(), aiFallback);
 
 // ---------- 토큰 ----------
 const b64u = (buf) => Buffer.from(buf).toString('base64url');
@@ -303,6 +309,7 @@ function teacherInfo() {
     port: PORT,
     ai: {
       provider: cfg.provider,
+      fallback: (aiFallback() || {}).provider || '',
       configured: !!cfg.apiKey,
       model: cfg.model,
       keyHint: maskKey(cfg.apiKey),

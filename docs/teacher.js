@@ -1033,6 +1033,7 @@
       h('div', { class: 'wrap', style: 'max-width:520px' },
         h('label', { class: 'field', for: 'prov' }, '판정에 쓸 AI', prov),
         h('p', null, h('span', { class: 'pill ' + (ai.configured ? 'ok' : 'warn') }, ai.configured ? '지금 연결: ' + (ai.provider === 'gemini' ? 'Gemini' : 'Claude') : '선택한 AI의 키가 필요해요'), ' ', ai.configured ? h('span', { class: 'muted small' }, ai.model) : null),
+        ai.fallback ? h('p', { class: 'muted small' }, '예비 AI: ' + (ai.fallback === 'gemini' ? 'Gemini' : 'Claude') + ' (위 AI가 응답하지 않거나 오류일 때 자동으로 대신 판정해요. 두 AI의 키를 모두 입력해 둔 경우에만 작동해요.)') : null,
         claudeBox, geminiBox,
         h('div', { class: 'toolbar' }, saveKey, ping), aiMsg));
 

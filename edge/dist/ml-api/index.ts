@@ -700,8 +700,10 @@ function normalize(raw, sentence) {
 }
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 class Grader {
-  constructor(getConfig) {
+  constructor(getConfig, getFallback) {
     this.getConfig = getConfig; // () => { apiKey, model, baseUrl }
+    this.getFallback = getFallback || (() => null); // 주 AI가 안 될 때 대신 쓸 다른 AI 설정(없으면 null)
+    this.lastFallbackAt = 0;
     this.cache = new Map();
     this.active = 0;
     this.waiters = [];
@@ -709,7 +711,8 @@ class Grader {
   }
   configured() {
     const c = this.getConfig();
-    return !!(c && c.apiKey);
+    const f = this.getFallback();
+    return !!((c && c.apiKey) || (f && f.apiKey));
   }
   async acquire() {
     if (this.active < this.maxConcurrent) { this.active++; return; }
@@ -721,8 +724,8 @@ class Grader {
     const next = this.waiters.shift();
     if (next) next();
   }
-  async callApi(system, userMsg, maxTokens) {
-    const cfg = this.getConfig();
+  async callApi(system, userMsg, maxTokens, cfgIn, maxMs) {
+    const cfg = cfgIn || this.getConfig();
     const gem = cfg.provider === 'gemini';
     const url = gem
       ? (cfg.baseUrl || 'https://generativelanguage.googleapis.com').replace(/\/+$/, '') + '/v1beta/models/' + encodeURIComponent(cfg.model) + ':generateContent'
@@ -732,7 +735,7 @@ class Grader {
     const t0 = Date.now();
     let lastErr = null;
     for (let i = 0; i < delays.length; i++) {
-      if (i > 0 && Date.now() - t0 > 22000) break;   // 학생을 너무 오래 기다리게 하지 않는다
+      if (i > 0 && Date.now() - t0 > (maxMs || 22000)) break;   // 학생을 너무 오래 기다리게 하지 않는다
       if (delays[i]) await sleep(delays[i]);
       const ctl = new AbortController();
       const timer = setTimeout(() => ctl.abort(), 20000);
@@ -779,6 +782,15 @@ class Grader {
     }
     return { ok: false, code: 'unavailable', message: 'AI 판정 서비스에 연결하지 못했어요. ' + (lastErr ? `(${lastErr.status || '네트워크'}: ${lastErr.message})` : '') };
   }
+  async callWithFallback(system, userMsg, maxTokens) {
+    const fb = this.getFallback();
+    const first = await this.callApi(system, userMsg, maxTokens, null, fb ? 15000 : 0);
+    if (first.ok || !fb || first.code === 'request') return first;
+    console.log('[AI 예비 전환]', this.getConfig().provider, '->', fb.provider, first.code, first.message);
+    const second = await this.callApi(system, userMsg, maxTokens, fb, 0);
+    if (second.ok) { this.lastFallbackAt = Date.now(); return second; }
+    return first;   // 둘 다 안 되면 주 AI 쪽 오류를 보여 준다
+  }
   async grade(r, sentence) {
     const cacheKey = [r.comp.id, r.struct.id, r.topic.id, sentence].join('|');
     if (this.cache.has(cacheKey)) return { ok: true, result: this.cache.get(cacheKey), cached: true };
@@ -789,7 +801,7 @@ class Grader {
       const t0 = Date.now();
       for (let attempt = 0; attempt < 2; attempt++) {
         if (attempt > 0 && Date.now() - t0 > 30000) break;
-        const out = await this.callApi(SYSTEM, buildUserMessage(r, sentence), 1500);
+        const out = await this.callWithFallback(SYSTEM, buildUserMessage(r, sentence), 1500);
         if (!out.ok) return out;
         const result = normalize(extractJson(out.text), sentence);
         if (result) {
@@ -1312,8 +1324,8 @@ const DEFAULT_MODEL = 'claude-sonnet-5-5';
 const DEFAULT_GEMINI = 'gemini-3.8-flash';
 const store = new DbStore();
 C.setHook({ save: (st) => (st ? store.putKv('conditions', st) : store.delKv('conditions')) });
-function aiConfig() {
-  const gem = store.settings.provider === 'gemini';
+function aiConfig(which) {
+  const gem = (which || store.settings.provider) === 'gemini';
   return gem ? {
     provider: 'gemini',
     apiKey: store.settings.geminiApiKey || process.env.GEMINI_API_KEY || '',
@@ -1326,7 +1338,12 @@ function aiConfig() {
     baseUrl: process.env.ANTHROPIC_BASE_URL || '',
   };
 }
-const grader = new Grader(aiConfig);
+function aiFallback() {
+  const other = store.settings.provider === 'gemini' ? 'claude' : 'gemini';
+  const c = aiConfig(other);
+  return c.apiKey ? c : null;
+}
+const grader = new Grader(() => aiConfig(), aiFallback);
 const b64u = (buf) => Buffer.from(buf).toString('base64url');
 function sign(payload) {
   const body = b64u(JSON.stringify(payload));
@@ -1513,6 +1530,7 @@ function teacherInfo() {
     port: PORT,
     ai: {
       provider: cfg.provider,
+      fallback: (aiFallback() || {}).provider || '',
       configured: !!cfg.apiKey,
       model: cfg.model,
       keyHint: maskKey(cfg.apiKey),
