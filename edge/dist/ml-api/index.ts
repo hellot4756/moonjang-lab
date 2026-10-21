@@ -1499,7 +1499,7 @@ function periodStart(period) {
   if (period === '7d') return Date.now() - 7 * 24 * HOUR;
   return 0;
 }
-function topicTodo(r) { return finalVerdict(r) === 'correct' && !r.topicJudge; }
+function topicTodo(r) { return false; }   // 주제 판단 기능은 없앴다
 function needsReview(r) {
   return (r.flagged || r.needsReview) && !r.override && !r.reviewed;
 }
@@ -1932,6 +1932,7 @@ async function handleApi(req, res, pathname, query) {
     const b = await readBody(req, 256);
     const rec = store.getRecord(String(b.id || ''));
     if (!rec || !rec.gk || rec.gk !== groupKey(st)) throw new HttpError(404, '문장을 찾을 수 없어요.');
+    if (finalVerdict(rec) !== 'correct') throw new HttpError(400, '문법 조건을 통과한 문장만 진행할 수 있어요.');
     store.patchRecord(rec.id, { roomDone: b.undo ? 0 : Date.now() });
     return send(res, 200, { ok: true });
   }
@@ -1944,7 +1945,7 @@ async function handleApi(req, res, pathname, query) {
     if (rateLimited('padlet:' + st.sid, 6, 60 * 1000)) throw new HttpError(429, '너무 빨리 올리고 있어요. 잠시 뒤에 다시 해 주세요.');
     const rec = store.getRecord(String(b.id || ''));
     if (!rec || (rec.sid !== st.sid && !(rec.gk && rec.gk === groupKey(st)))) throw new HttpError(404, '올릴 문장을 찾지 못했어요.');
-    if (finalVerdict(rec) === 'incorrect') throw new HttpError(400, '문법 조건을 맞힌 문장만 올릴 수 있어요.');
+    if (finalVerdict(rec) !== 'correct') throw new HttpError(400, '문법 조건을 통과한 문장만 올릴 수 있어요.');
     if (rec.gk) requireLeader(st);
     if (rec.padletAt && !b.again) return send(res, 200, { ok: true, already: true, at: rec.padletAt });
     const gno = rec.gk ? store.groupOf(st.sid) : 0;
@@ -2027,6 +2028,7 @@ async function handleApi(req, res, pathname, query) {
       requireLeader(st);
       const rec = store.getRecord(String(b.recId));
       if (!rec || !rec.gk || rec.gk !== groupKey(st)) throw new HttpError(404, '문장을 찾을 수 없어요.');
+      if (finalVerdict(rec) !== 'correct') throw new HttpError(400, '문법 조건을 통과한 문장만 포스터를 만들 수 있어요.');
       store.patchRecord(rec.id, { poster: { opts, prompt, promptEn: String(b.promptEn || '').trim().slice(0, 4000), by: st.name, at: Date.now() }, roomDone: 0 });
     }
     const p = store.addPoster({

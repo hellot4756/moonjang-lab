@@ -150,7 +150,7 @@
   function groupSentences() {
     const G = S.group;
     if (!G || !G.slots) return [];
-    return G.slots.filter((x) => x.status !== 'todo').map((x) => ({ id: x.id, slot: x.i, sentence: x.sentence, topic: x.topic || '', comp: x.comp || '', struct: x.struct || '', verdict: x.status === 'done' ? 'correct' : 'pending', padletAt: x.padletAt || 0 }));
+    return G.slots.filter((x) => x.status === 'done').map((x) => ({ id: x.id, slot: x.i, sentence: x.sentence, topic: x.topic || '', comp: x.comp || '', struct: x.struct || '', verdict: x.status === 'done' ? 'correct' : 'pending', padletAt: x.padletAt || 0 }));
   }
 
   function posterSentences() {
@@ -161,8 +161,8 @@
       if (!sentence || seen.has(key)) return;
       seen.add(key); out.push({ id, sentence, topic: topic || '', verdict });
     };
-    if (S.last && S.last.sentence && S.last.verdict !== 'incorrect' && S.challenge) add(S.last.id, S.last.sentence, S.last.topic || S.challenge.conditions.topic.label, S.last.verdict);
-    for (const it of S.history) if (it.verdict !== 'incorrect') add(it.id, it.sentence, it.topic, it.verdict);
+    if (S.last && S.last.sentence && S.last.verdict === 'correct' && S.challenge) add(S.last.id, S.last.sentence, S.last.topic || S.challenge.conditions.topic.label, S.last.verdict);
+    for (const it of S.history) if (it.verdict === 'correct') add(it.id, it.sentence, it.topic, it.verdict);
     return out;
   }
 
@@ -182,7 +182,7 @@
       : [h('h2', null, '공익광고 포스터 프롬프트 만들기'),
         h('p', { class: 'muted', style: 'margin-bottom:12px' }, '내가 완성한 문장으로 이미지 만들기 AI에게 줄 요청문(프롬프트)을 만들어요. 아래에서 고르거나 쓴 뒤 [프롬프트 만들기]를 눌러 보세요.')];
     if (!sents.length) {
-      kids.push(h('div', { class: 'notice warn' }, '먼저 조건에 맞는 문장을 완성해 보세요. 문법 조건을 맞힌 문장(선생님이 확인 중인 문장 포함)으로 만들 수 있어요.'));
+      kids.push(h('div', { class: 'notice warn' }, '먼저 조건에 맞는 문장을 완성해 보세요. 문법 조건을 맞힌 문장으로 만들 수 있어요.'));
       box.replaceChildren(...kids); return;
     }
 
@@ -293,11 +293,11 @@
       if (!sentence || seen.has(key)) return;
       seen.add(key); out.push({ id, sentence, topic: topic || '', comp: comp || '', struct: struct || '', verdict });
     };
-    if (S.last && S.last.sentence && S.last.verdict !== 'incorrect' && S.challenge) {
+    if (S.last && S.last.sentence && S.last.verdict === 'correct' && S.challenge) {
       const c = S.challenge.conditions;
       add(S.last.id, S.last.sentence, S.last.topic || c.topic.label, c.comp.label, c.struct.label, S.last.verdict);
     }
-    for (const it of S.history) if (it.verdict !== 'incorrect') add(it.id, it.sentence, it.topic, it.comp, it.struct, it.verdict);
+    for (const it of S.history) if (it.verdict === 'correct') add(it.id, it.sentence, it.topic, it.comp, it.struct, it.verdict);
     return out;
   }
 
@@ -306,7 +306,7 @@
     const kids = [h('h2', null, '패들렛에 올리기'),
       h('p', { class: 'muted', style: 'margin-bottom:12px' }, S.padlet.post ? '광고문구, 문법 조건, 주제를 내 패들렛 방에 바로 올려요. 올린 뒤에는 이어서 포스터 프롬프트를 만들어요.' : '광고문구, 문법 조건, 주제를 양식에 맞게 한 번에 복사해요. 패들렛에서 새 글을 만들고 붙여 넣은 뒤, 포스터 그림을 함께 올려 주세요.')];
     if (!sents.length) {
-      kids.push(h('div', { class: 'notice warn' }, '먼저 조건에 맞는 문장을 완성해 보세요. 문법 조건을 맞힌 문장(선생님이 확인 중인 문장 포함)으로 만들 수 있어요.'));
+      kids.push(h('div', { class: 'notice warn' }, '먼저 조건에 맞는 문장을 완성해 보세요. 문법 조건을 맞힌 문장으로 만들 수 있어요.'));
       box.replaceChildren(...kids); return;
     }
     let cur = sents.findIndex((x) => x.id === S.padPick);
@@ -409,6 +409,8 @@
     const firstTodo = steps.find((x) => !x.done);
     const openId = (M.view && steps.some((x) => x.id === M.view)) ? M.view : (firstTodo ? firstTodo.id : '');
     const doneN = steps.filter((x) => x.done).length;
+    // 앞 단계를 끝내야 다음 단계가 열린다 (모둠원이 모둠장의 포스터를 구경하는 단계는 예외)
+    const lockedAt = (i) => steps.slice(0, i).some((x) => !x.done) && !(S.group && !lead && (steps[i].id === 'make' || steps[i].id === 'copy'));
 
     const card = h('section', { class: 'card mission', id: 'mission' });
     const redraw = () => { const n = missionCard(); if (n) card.replaceWith(n); };
@@ -498,11 +500,11 @@
 
     const list = h('ol', { class: 'msteps' });
     steps.forEach((st, i) => {
-      const open = st.id === openId;
-      const head = h('button', { type: 'button', class: 'mhead', 'aria-expanded': String(open), onclick: () => { if (st.id === openId && M.view) { M.view = ''; } else M.view = st.id; save(); redraw(); } },
+      const open = st.id === openId && !lockedAt(i);
+      const head = h('button', { type: 'button', class: 'mhead', 'aria-expanded': String(open), disabled: lockedAt(i) || null, onclick: () => { if (st.id === openId && M.view) { M.view = ''; } else M.view = st.id; save(); redraw(); } },
         h('span', { class: 'mnum' + (st.done ? ' done' : '') }, st.done ? '✓' : String(i + 1)),
         h('span', { class: 'mtitle' }, st.title),
-        st.done ? h('span', { class: 'mtag' }, '완료') : (st === firstTodo ? h('span', { class: 'mtag now' }, '지금 할 일') : null));
+        lockedAt(i) ? h('span', { class: 'mtag' }, '🔒 앞 단계 먼저') : st.done ? h('span', { class: 'mtag' }, '완료') : (st === firstTodo ? h('span', { class: 'mtag now' }, '지금 할 일') : null));
       list.append(h('li', { class: 'mstep' + (open ? ' open' : '') + (st.done ? ' done' : '') }, head, open ? h('div', { class: 'mbody' }, body(st.id)) : null));
     });
     const finished = !firstTodo;
@@ -657,24 +659,8 @@
     component: '문장 성분 조건', structure: '문장의 짜임 조건', wellformed: '완결된 한 문장',
   };
 
-  const TOPIC_MARK = {
-    ok: ['적절', 'ok', '주제와 잘 어울리는 문장이에요.'],
-    no: ['다시 생각해 보기', 'warn', '주제와 내용이 잘 이어지는지 선생님 피드백을 읽고 다시 생각해 보세요.'],
-  };
-
-  // 공익광고 주제는 AI가 아니라 선생님이 판단한다. 선생님이 남긴 판단과 피드백을 보여 준다.
   function teacherBits(r) {
     const box = [];
-    const m = TOPIC_MARK[r.topicJudge];
-    if (m) {
-      box.push(h('li', { class: 'check ' + (r.topicJudge === 'ok' ? 'ok' : 'no') },
-        h('div', { class: 'tag' }, m[0]),
-        h('div', null, h('div', { class: 't' }, '공익광고 주제 (선생님 확인)'), h('div', { class: 'r' }, m[2]))));
-    } else if (r.verdict === 'correct') {
-      box.push(h('li', { class: 'check wait' },
-        h('div', { class: 'tag' }, '확인 중'),
-        h('div', null, h('div', { class: 't' }, '공익광고 주제'), h('div', { class: 'r' }, '주제와 어울리는지는 선생님이 직접 확인해 줄 거예요.'))));
-    }
     const out = [];
     if (box.length) out.push(h('ul', { class: 'checks' }, box));
     if (r.tfeedback) out.push(h('div', { class: 'block tfb' }, h('div', { class: 'ttl' }, '선생님 피드백'), h('div', { style: 'white-space:pre-wrap' }, r.tfeedback)));
@@ -794,7 +780,6 @@
           new Date(it.ts).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
           it.comp + ' · ' + it.struct + ' · ' + it.topic),
         h('div', { class: 's' }, it.sentence),
-        TOPIC_MARK[it.topicJudge] ? h('div', { class: 'meta' }, h('span', { class: 'pill ' + TOPIC_MARK[it.topicJudge][1] }, '주제 ' + TOPIC_MARK[it.topicJudge][0])) : (it.verdict === 'correct' ? h('div', { class: 'meta' }, h('span', { class: 'pill gray' }, '주제 확인 중')) : null),
         it.tfeedback ? h('div', { class: 'block tfb' }, h('div', { class: 'ttl' }, '선생님 피드백'), h('div', { style: 'white-space:pre-wrap' }, it.tfeedback)) : null));
     }
     const rate = S.stats.tries ? Math.round((S.stats.correct / S.stats.tries) * 100) : 0;

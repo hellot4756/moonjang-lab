@@ -225,7 +225,7 @@
             h('div', { class: 'ctop' }, h('span', { class: 'no' }, s.no || '', s.level ? h('span', { class: 'lvtag', title: s.level === 'easy' ? '난이도 하' : '난이도 상' }, s.level === 'easy' ? '하' : '상') : null), s.attempt > 1 ? h('span', { class: 'att' }, s.attempt + '회') : null),
             h('div', { class: 'nm' }, s.name),
             h('div', { class: 'cst' }, h('span', { class: 'ic', 'aria-hidden': 'true' }, icon), h('span', { class: 'lb' }, ' ' + (s.state === 'pending' && !s.manual ? 'AI 오류' : name))),
-            s.topicTodo ? h('span', { class: 'flag', title: '주제 확인 필요' }, '주') : (s.review ? h('span', { class: 'flag', title: '확인 필요' }, '!') : null)));
+            (s.review ? h('span', { class: 'flag', title: '확인 필요' }, '!') : null)));
         });
         if (T.seatEdit) attachDrag(board, c, slots);
         out.push(board);
@@ -351,18 +351,17 @@
   function renderStatusData(statsBox, data, o) {
     const sum = o.students.reduce((a, s) => ({ tries: a.tries + s.tries, correct: a.correct + s.correct }), { tries: 0, correct: 0 });
     const rate = sum.tries ? Math.round((sum.correct / sum.tries) * 100) : 0;
-    const review = h('button', { class: 'link', type: 'button', onclick: () => { T.tab = 'records'; T.verdict = 'review'; T.topicF = ''; renderShell(); } }, '확인하기');
+    const review = h('button', { class: 'link', type: 'button', onclick: () => { T.tab = 'records'; T.verdict = 'review'; renderShell(); } }, '확인하기');
     const mk = (n, label, extra) => h('div', { class: 'stat' }, h('b', null, String(n)), h('span', null, label), extra || null);
     statsBox.replaceChildren(
       mk(o.online, '접속 중인 학생'), mk(sum.tries, '제출한 문장'), mk(sum.correct, '문법 정답'), mk(rate + '%', '정답률'),
-      mk(o.reviewOpen, '교사 확인 필요', o.reviewOpen ? h('div', null, review) : null),
-      mk(o.topicOpen, '주제 확인 필요', o.topicOpen ? h('div', null, h('button', { class: 'link', type: 'button', onclick: () => { T.tab = 'records'; T.verdict = 'correct'; T.topicF = 'todo'; renderShell(); } }, '확인하기')) : null));
+      mk(o.reviewOpen, '교사 확인 필요', o.reviewOpen ? h('div', null, review) : null));
     const table = h('table', { class: 'grid' });
     table.append(h('thead', null, h('tr', null,
       h('th', null, ''), h('th', null, '반'), h('th', { class: 'num' }, '번호'), h('th', null, '이름'), h('th', null, '학번'),
-      h('th', { class: 'num' }, '제출'), h('th', { class: 'num' }, '문법 정답'), h('th', null, '정답률'), h('th', null, '확인 필요'), h('th', null, '주제 확인'), h('th', null, '마지막 제출'))));
+      h('th', { class: 'num' }, '제출'), h('th', { class: 'num' }, '문법 정답'), h('th', null, '정답률'), h('th', null, '확인 필요'), h('th', null, '마지막 제출'))));
     const tb = h('tbody');
-    if (!o.students.length) tb.append(h('tr', null, h('td', { colspan: '11', class: 'muted' }, '명단이 비어 있어요. [명단 관리] 탭에서 학생 명단을 먼저 넣어 주세요.')));
+    if (!o.students.length) tb.append(h('tr', null, h('td', { colspan: '10', class: 'muted' }, '명단이 비어 있어요. [명단 관리] 탭에서 학생 명단을 먼저 넣어 주세요.')));
     for (const s of o.students) {
       const r = s.tries ? Math.round((s.correct / s.tries) * 100) : 0;
       const tr = h('tr', { class: 'click', tabindex: '0', onclick: () => openDrawer(s) },
@@ -371,7 +370,6 @@
         h('td', { class: 'num' }, s.tries), h('td', { class: 'num' }, s.correct),
         h('td', null, s.tries ? [h('span', { class: 'bar' }, h('i', { style: `width:${r}%` })), r + '%'] : '-'),
         h('td', null, s.review ? h('span', { class: 'pill warn' }, s.review + '건') : ''),
-        h('td', null, s.topicTodo ? h('span', { class: 'pill blue' }, s.topicTodo + '건') : ''),
         h('td', null, fmt(s.last)));
       tr.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') openDrawer(s); });
       tb.append(tr);
@@ -449,20 +447,12 @@
   }
 
 
-  // 주제 판단(교사)과 학생에게 보여 줄 피드백
+  // 학생에게 보여 줄 교사 피드백
   function teacherPanel(r, onChange) {
     const wrap = h('div', { class: 'tpanel' });
     const save = async (body, okMsg) => {
       try { const o = await api('/api/teacher/feedback', Object.assign({ id: r.id }, body)); T.fbDirty = false; if (okMsg) toast(okMsg); onChange(o.record); } catch (e) { toast(e.message, true); }
     };
-    const mark = (val, label, cls) => h('button', {
-      class: 'btn sm' + (r.topicJudge === val ? ' ' + cls : ''), type: 'button', 'aria-pressed': String(r.topicJudge === val),
-      onclick: () => save({ topic: r.topicJudge === val ? '' : val }),
-    }, label);
-    wrap.append(h('div', { class: 'toolbar' }, h('b', { class: 'small' }, '주제 판단'),
-      mark('ok', '적절', 'primary'), mark('no', '부적절', 'danger'),
-      !r.topicJudge && r.final === 'correct' ? h('span', { class: 'pill blue' }, '확인 필요') : null,
-      h('span', { class: 'muted small' }, '(공익광고 주제와 내용이 맞는지는 교사가 판단해요)')));
     const ta = h('textarea', { class: 'fbtext', rows: '2', maxlength: '500', placeholder: '학생에게 보여 줄 피드백을 적어 주세요. (학생 화면에 바로 표시돼요)', 'aria-label': '교사 피드백' });
     ta.value = r.tfeedback || '';
     ta.addEventListener('input', () => { T.fbDirty = ta.value !== (r.tfeedback || ''); });
@@ -541,7 +531,7 @@
     const load = async (append) => {
       try {
         const before = append && recs.length ? recs[recs.length - 1].ts : '';
-        const o = await api('/api/teacher/records?' + qs({ cls: T.cls, period: T.period, verdict: T.verdict, limit: 50, before, topic: T.topicF, fb: T.fbF, gno: T.gnoF }));
+        const o = await api('/api/teacher/records?' + qs({ cls: T.cls, period: T.period, verdict: T.verdict, limit: 50, before, fb: T.fbF, gno: T.gnoF }));
         recs = append ? recs.concat(o.records) : o.records;
         more = o.records.length === 50;
         draw();
@@ -560,10 +550,6 @@
         load();
       } catch (e) { toast(e.message, true); }
     } }, '판정 대기 모두 AI로 판정');
-    const tsel = h('select', { 'aria-label': '주제 판단 선택' },
-      h('option', { value: '' }, '주제 전체'), h('option', { value: 'todo' }, '주제 확인 필요 (문법 정답 중)'), h('option', { value: 'ok' }, '주제 적절'), h('option', { value: 'no' }, '주제 부적절'));
-    tsel.value = T.topicF;
-    tsel.addEventListener('change', () => { T.topicF = tsel.value; load(); });
     const fsel = h('select', { 'aria-label': '피드백 선택' },
       h('option', { value: '' }, '피드백 전체'), h('option', { value: 'none' }, '피드백 없음'), h('option', { value: 'has' }, '피드백 있음'));
     fsel.value = T.fbF;
@@ -572,12 +558,6 @@
       ...Array.from({ length: (T.info && T.info.settings && T.info.settings.groupCount) || 8 }, (_, i) => h('option', { value: String(i + 1) }, `${i + 1}모둠`)));
     gsel.value = T.gnoF;
     gsel.addEventListener('change', () => { T.gnoF = gsel.value; load(); });
-    const bulkOk = h('button', { class: 'btn sm', type: 'button', onclick: async () => {
-      const ids = recs.filter((x) => !x.topicJudge).map((x) => x.id);
-      if (!ids.length) { toast('주제 판단이 필요한 기록이 없어요.', true); return; }
-      if (!confirm(`화면에 보이는 기록 중 주제를 아직 판단하지 않은 ${ids.length}건을 모두 '적절'로 표시할까요? (부적절한 것은 나중에 개별로 바꿀 수 있어요)`)) return;
-      try { const o = await api('/api/teacher/feedback/bulk', { ids, topic: 'ok' }); toast(`${o.changed}건을 '적절'로 표시했어요.`); load(); } catch (e) { toast(e.message, true); }
-    } }, "보이는 기록 모두 '주제 적절'");
     const delShown = h('button', { class: 'btn sm danger', type: 'button', onclick: async () => {
       const ids = recs.map((x) => x.id);
       if (!ids.length) { toast('지울 기록이 없어요.', true); return; }
@@ -590,7 +570,7 @@
       if (!confirm(`정말 ${T.cls} 전체를 지울까요? 한 번 더 확인해요.`)) return;
       try { const o = await api('/api/teacher/class/reset', { cls: T.cls }); toast(`${T.cls}: ${o.deleted}건을 지웠어요.`); load(); } catch (e) { toast(e.message, true); }
     } }, '이 반 기록 모두 지우기');
-    const tb = h('div', { class: 'toolbar' }, classSelect(() => load()), vsel, tsel, fsel, (T.info && T.info.settings && T.info.settings.groupMode) ? gsel : null, periodSelect(() => load()), autoBox(() => load()), h('span', { class: 'spacer' }), bulkOk, regradeAll, delShown, delClass);
+    const tb = h('div', { class: 'toolbar' }, classSelect(() => load()), vsel, fsel, (T.info && T.info.settings && T.info.settings.groupMode) ? gsel : null, periodSelect(() => load()), autoBox(() => load()), h('span', { class: 'spacer' }), regradeAll, delShown, delClass);
     body.append(tb, list, moreBtn);
     api('/api/teacher/overview').then((o) => { T.classes = o.classes; tb.replaceChild(classSelect(() => load()), tb.firstChild); }).catch(() => {});
     load();
@@ -920,7 +900,7 @@
       } }, '기본 조건으로 되돌리기');
       box.replaceChildren(...[
         h('section', { class: 'card' }, h('h2', null, '조건 관리'),
-          h('p', { class: 'muted', style: 'margin-bottom:12px' }, '문장 성분 조건(출제 방식과 개수), 문장의 짜임 조건, 공익광고 주제를 정할 수 있어요. 학생에게는 켜 둔 조건 중에서 무작위로 나가요. 공익광고 주제는 AI가 판정하지 않고 선생님이 직접 판단해요.'),
+          h('p', { class: 'muted', style: 'margin-bottom:12px' }, '문장 성분 조건(출제 방식과 개수), 문장의 짜임 조건, 공익광고 주제를 정할 수 있어요. 학생에게는 켜 둔 조건 중에서 무작위로 나가요.'),
           bar, h('div', { class: 'toolbar', style: 'margin-top:12px' }, mkSave(), reset,
             T.info.conditionsCustomized ? h('span', { class: 'pill blue' }, '수정한 조건 사용 중') : h('span', { class: 'pill gray' }, '기본 조건 사용 중'))),
         sevenCard(),
