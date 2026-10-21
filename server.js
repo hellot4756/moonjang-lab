@@ -223,8 +223,61 @@ function statsMap(since) {
 // 이 학생의 패들렛 방: 번호로 찾는다(학생이 보낸 값은 쓰지 않는다)
 function padletRoom(st) {
   const cfg = (store.settings.padlet || {})[st.cls];
-  const room = cfg && cfg.rooms ? cfg.rooms[String(st.no)] : null;
+  const key = groupOn() && !st.demo ? String(store.groupOf(st.sid) || '') : String(st.no);   // 모둠 활동에서는 방 번호 = 모둠 번호
+  const room = cfg && cfg.rooms && key ? cfg.rooms[key] : null;
   return { cfg, room };
+}
+
+// ---------- 모둠 활동 ----------
+function groupOn() { return store.settings.groupMode === true; }
+function mulberry(seed) {
+  let a = seed >>> 0;
+  return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+function hashStr(str) { let h = 2166136261; for (const ch of String(str)) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
+
+// 모둠 하나의 문제 목록. 반·모둠 번호·교사가 정한 '새로 뽑기' 값으로 항상 같은 결과가 나오게 만든다(서버가 여러 개여도 같은 목록).
+function groupSlots(cls, no) {
+  const plan = store.settings.groupPlan || {};
+  const structs = C.snapshot().structs;
+  const picks = [];
+  for (const sx of structs) for (let k = 0; k < (plan[sx.id] || 0); k++) picks.push(sx.id);
+  const seed = Number(store.settings.groupSeed) || 1;
+  const r = mulberry(hashStr(`${cls}|${no}|${seed}`));
+  const recent = { comps: [], structs: [], topics: [] };
+  return picks.map((structId, i) => {
+    const ids = C.draw(store.settings.level, r, { comps: recent.comps.slice(-3), structs: [], topics: recent.topics.slice(-3) }, '', structId);
+    recent.comps.push(ids.comp); recent.topics.push(ids.topic);
+    return { i, n: `g${seed}.${hashStr(cls + '|' + no).toString(36)}.${i}`, ids };
+  });
+}
+function groupKey(st) { const no = store.groupOf(st.sid); return no ? `${st.cls}|${no}` : ''; }
+function groupMembers(cls, no) { return store.students.filter((x) => x.cls === cls && store.groupOf(x.sid) === no); }
+
+function groupView(st) {
+  if (!groupOn() || st.demo) return null;
+  const no = store.groupOf(st.sid);
+  const out = { count: store.settings.groupCount || 8, no, members: [], slots: [], total: 0, done: 0 };
+  if (!no) return out;
+  out.members = groupMembers(st.cls, no).map((x) => ({ name: x.name, me: x.sid === st.sid }));
+  const slots = groupSlots(st.cls, no);
+  const recs = store.records.filter((r) => r.gk === `${st.cls}|${no}`);
+  out.slots = slots.map((sl) => {
+    const mine = recs.filter((r) => r.cid === sl.n);
+    const okRec = mine.filter((r) => finalVerdict(r) === 'correct').pop() || null;
+    const pend = okRec ? null : mine.filter((r) => finalVerdict(r) === 'pending').pop() || null;
+    const res = C.resolve(sl.ids);
+    const view = res ? C.publicView(res) : null;
+    const rec = okRec || pend;
+    return {
+      i: sl.i, conds: view, tries: mine.length,
+      status: okRec ? 'done' : pend ? 'pending' : 'todo',
+      id: rec ? rec.id : '', sentence: rec ? rec.sentence : '', by: rec ? rec.name : '', topic: rec ? rec.topicLabel : (view ? view.topic.label : ''),
+      comp: res ? res.comp.label : '', struct: res ? res.struct.label : '', padletAt: rec ? rec.padletAt || 0 : 0,
+    };
+  });
+  out.total = out.slots.length; out.done = out.slots.filter((x) => x.status !== 'todo').length;
+  return out;
 }
 function padletFor(st) {
   const { cfg, room } = padletRoom(st);
@@ -327,6 +380,7 @@ function teacherInfo() {
       aiMode: store.settings.aiMode === 'off' ? 'off' : 'on',
       poster: store.settings.poster !== false,
       topicChoice: store.settings.topicChoice !== false,
+      groupMode: groupOn(), groupCount: store.settings.groupCount || 8, groupPlan: store.settings.groupPlan || {},
       observerPassword: store.settings.observerPassword || '',
       padletTemplate: store.settings.padletTemplate || '',
       padlet: {
@@ -475,8 +529,15 @@ async function handleApi(req, res, pathname, query) {
       topicList: store.settings.topicChoice !== false ? C.snapshot().topics.filter((x) => !x.off).map((x) => x.label) : [],
       padletTemplate: store.settings.padletTemplate || '',
       padlet: st.demo ? { post: true, link: '', board: false, demo: true } : padletFor(st),
+      group: groupView(st),
       demo: !!st.demo,
     });
+  }
+
+  // 모둠 화면용: 모둠원이 지금 어디까지 했는지(가볍게 자주 읽는다)
+  if (method === 'GET' && pathname === '/api/group') {
+    const st = studentAuth(req);
+    return send(res, 200, { group: groupView(st) });
   }
 
   if (method === 'POST' && pathname === '/api/challenge') {
@@ -484,9 +545,18 @@ async function handleApi(req, res, pathname, query) {
     if (!st.demo && !store.settings.open) throw new HttpError(403, '지금은 수업이 닫혀 있어요.');
     // 학생별 난이도: 하 → 짜임은 쉬운 것만, 성분 개수는 가장 적게 / 상 → 기본 조건만, 성분 개수는 가장 많게
     const own = st.level === 'easy' || st.level === 'basic' ? st.level : '';
-    const ids = C.draw(own || store.settings.level, rnd, recentConditions(st.sid), own === 'easy' ? 'min' : own === 'basic' ? 'max' : '');
+    let ids, cid = '', gk = '';
+    if (groupOn() && !st.demo) {
+      // 모둠 활동: 모둠 목록에서 고른 문제의 조건을 그대로 받는다(모둠원이 모두 같은 조건)
+      const b0 = await readBody(req, 512);
+      gk = groupKey(st);
+      if (!gk) throw new HttpError(400, '먼저 모둠을 골라 주세요.');
+      const sl = groupSlots(st.cls, store.groupOf(st.sid))[parseInt(b0.slot, 10)];
+      if (!sl) throw new HttpError(400, '모둠 문제를 찾을 수 없어요. 화면을 새로고침해 주세요.');
+      ids = sl.ids; cid = sl.n;
+    } else ids = C.draw(own || store.settings.level, rnd, recentConditions(st.sid), own === 'easy' ? 'min' : own === 'basic' ? 'max' : '');
     const resolved = C.resolve(ids);
-    const token = sign({ r: 'c', sid: st.sid, ids, n: store.newId(), exp: Date.now() + 4 * HOUR });
+    const token = sign({ r: 'c', sid: st.sid, ids, n: cid || store.newId(), g: gk, exp: Date.now() + 4 * HOUR });
     if (!st.demo) activity.set(st.sid, { typingAt: 0, draftLen: 0, challengeAt: Date.now() });
     const choice = store.settings.topicChoice !== false;
     return send(res, 200, {
@@ -509,6 +579,19 @@ async function handleApi(req, res, pathname, query) {
     return send(res, 200, { ok: true });
   }
 
+  // 모둠 고르기: 아직 모둠이 없는 학생이 한 번 고를 수 있다. 잘못 골랐다면 선생님이 옮겨 준다.
+  if (method === 'POST' && pathname === '/api/group/join') {
+    const st = studentAuth(req);
+    if (st.demo || !groupOn()) throw new HttpError(400, '지금은 모둠 활동이 아니에요.');
+    if (rateLimited('gjoin:' + st.sid, 10, 60 * 1000)) throw new HttpError(429, '잠시 뒤에 다시 해 주세요.');
+    const b = await readBody(req, 256);
+    const no = parseInt(b.no, 10);
+    if (!(no >= 1 && no <= (store.settings.groupCount || 8))) throw new HttpError(400, '모둠 번호를 다시 골라 주세요.');
+    if (store.groupOf(st.sid)) throw new HttpError(400, '이미 모둠이 정해졌어요. 바꾸려면 선생님께 말씀드려 주세요.');
+    store.setGroup(st.sid, no);
+    return send(res, 200, { group: groupView(st) });
+  }
+
   // 학생의 광고문구를 그 학생 번호의 패들렛 섹션(소회의실)에 글로 올린다. 올릴 곳은 서버가 번호로 정하고, 글도 서버의 기록으로 만든다.
   if (method === 'POST' && pathname === '/api/padlet/post') {
     const st = studentAuth(req);
@@ -518,13 +601,15 @@ async function handleApi(req, res, pathname, query) {
     if (!store.settings.padletApiKey || !cfg || !cfg.boardId || !room || !room.section) throw new HttpError(400, '내 패들렛 방이 아직 연결되지 않았어요. 선생님께 알려 주세요.');
     if (rateLimited('padlet:' + st.sid, 6, 60 * 1000)) throw new HttpError(429, '너무 빨리 올리고 있어요. 잠시 뒤에 다시 해 주세요.');
     const rec = store.getRecord(String(b.id || ''));
-    if (!rec || rec.sid !== st.sid) throw new HttpError(404, '올릴 문장을 찾지 못했어요.');
+    if (!rec || (rec.sid !== st.sid && !(rec.gk && rec.gk === groupKey(st)))) throw new HttpError(404, '올릴 문장을 찾지 못했어요.');
     if (finalVerdict(rec) === 'incorrect') throw new HttpError(400, '문법 조건을 맞힌 문장만 올릴 수 있어요.');
     if (rec.padletAt && !b.again) return send(res, 200, { ok: true, already: true, at: rec.padletAt });
+    const gno = rec.gk ? store.groupOf(st.sid) : 0;
+    const who = gno ? `${gno}모둠 (${groupMembers(st.cls, gno).map((x) => x.name).join(', ')})` : st.name;
     const text = PosterLib.fillTemplate(store.settings.padletTemplate, {
-      '이름': st.name, '학번': st.sid, '반': st.cls, '광고문구': rec.sentence, '성분조건': rec.compLabel, '짜임조건': rec.structLabel, '주제': rec.topicLabel,
+      '이름': who, '학번': gno ? '' : st.sid, '반': st.cls, '광고문구': rec.sentence, '성분조건': rec.compLabel, '짜임조건': rec.structLabel, '주제': rec.topicLabel,
     });
-    const out = await PADLET.createPost({ key: store.settings.padletApiKey, boardId: cfg.boardId, section: room.section, subject: `${st.no ? st.no + '번 ' : ''}${st.name}`, body: text });
+    const out = await PADLET.createPost({ key: store.settings.padletApiKey, boardId: cfg.boardId, section: room.section, subject: gno ? `${gno}모둠` : `${st.no ? st.no + '번 ' : ''}${st.name}`, body: text });
     if (!out.ok) {
       padletLastError = `${new Date().toLocaleTimeString('ko-KR')} ${st.cls} ${st.no}번: ${out.status || '연결 실패'} ${out.detail || ''}`.slice(0, 300);
       console.log('[패들렛 오류]', padletLastError);
@@ -550,7 +635,8 @@ async function handleApi(req, res, pathname, query) {
     if (!/[가-힣]/.test(sentence)) throw new HttpError(400, '한글로 문장을 써 주세요.');
 
     if (rateLimited('submit:' + (st.demo ? 'demo:' + ip : st.sid), st.demo ? 20 : 12, 60 * 1000)) throw new HttpError(429, '너무 빨리 제출하고 있어요. 잠시 뒤에 다시 제출해 주세요.');
-    const attempt = st.demo ? (demoTries.set(ch.n, (demoTries.get(ch.n) || 0) + 1), demoTries.get(ch.n)) : store.records.filter((r) => r.cid === ch.n && r.sid === st.sid).length + 1;
+    if (ch.g && ch.g !== groupKey(st)) throw new HttpError(410, '모둠이 바뀌었어요. 모둠 화면에서 다시 시작해 주세요.');
+    const attempt = st.demo ? (demoTries.set(ch.n, (demoTries.get(ch.n) || 0) + 1), demoTries.get(ch.n)) : store.records.filter((r) => r.cid === ch.n && (ch.g || r.sid === st.sid)).length + 1;
     if (attempt > 25) throw new HttpError(429, '이 조건으로는 충분히 도전했어요. 새 조건을 받아 주세요.');
 
     // 학생이 목록에서 고른 주제(선생님이 허용한 경우). 주제는 채점하지 않고 기록과 예시 문장에만 쓴다.
@@ -569,7 +655,7 @@ async function handleApi(req, res, pathname, query) {
       comp: ch.ids.comp, struct: ch.ids.struct, topic: ch.ids.topic,
       compLabel: resolved.comp.label, structLabel: resolved.struct.label, topicLabel, topicCustom,
       sentence, flagged: false,
-    }, fields));
+    }, ch.g ? { gk: ch.g, gno: store.groupOf(st.sid) } : {}, fields));
 
     const reveal = fields.verdict === 'correct' || (store.settings.revealAfter > 0 && attempt >= store.settings.revealAfter && fields.verdict === 'incorrect');
     return send(res, 200, {
@@ -643,6 +729,10 @@ async function handleApi(req, res, pathname, query) {
       if (b.aiMode !== undefined) patch.aiMode = b.aiMode === 'off' ? 'off' : 'on';
       if (b.poster !== undefined) patch.poster = !!b.poster;
       if (b.topicChoice !== undefined) patch.topicChoice = !!b.topicChoice;
+      if (b.groupMode !== undefined) patch.groupMode = !!b.groupMode;
+      if (b.groupCount !== undefined) patch.groupCount = parseInt(b.groupCount, 10);
+      if (b.groupPlan && typeof b.groupPlan === 'object') patch.groupPlan = b.groupPlan;
+      if (b.groupReseed) patch.groupSeed = (Number(store.settings.groupSeed) || 1) + 1;
       if (typeof b.padletTemplate === 'string') patch.padletTemplate = b.padletTemplate;
       if (typeof b.observerPassword === 'string') patch.observerPassword = b.observerPassword;
       if (typeof b.apiKey === 'string' && b.apiKey.trim()) patch.apiKey = b.apiKey;
@@ -655,6 +745,43 @@ async function handleApi(req, res, pathname, query) {
       store.updateSettings(patch);
       grader.cache.clear();
       return send(res, 200, teacherInfo());
+    }
+
+    // 모둠 편성 현황: 반별 학생의 모둠과 모둠별 진행(완성한 문장 수)
+    if (method === 'GET' && pathname === '/api/teacher/groups') {
+      const cls = query.get('cls') || '';
+      const count = store.settings.groupCount || 8;
+      const plan = store.settings.groupPlan || {};
+      const students = store.students.filter((x) => !cls || x.cls === cls);
+      const groups = [];
+      for (let no = 1; no <= count; no++) {
+        const members = students.filter((x) => store.groupOf(x.sid) === no).map((x) => ({ sid: x.sid, name: x.name, no: x.no }));
+        let done = 0, total = 0;
+        if (cls && members.length) { const v = groupView({ sid: members[0].sid, cls, name: '' }); total = v.total; done = v.slots.filter((x) => x.status === 'done').length; }
+        groups.push({ no, members, done, total });
+      }
+      return send(res, 200, {
+        count, mode: groupOn(), plan, planTotal: Object.values(plan).reduce((a, b) => a + b, 0),
+        structs: C.snapshot().structs.map((x) => ({ id: x.id, label: x.label, level: x.level, off: !!x.off })),
+        groups, unassigned: students.filter((x) => !store.groupOf(x.sid)).map((x) => ({ sid: x.sid, name: x.name, no: x.no })),
+        all: students.map((x) => ({ sid: x.sid, name: x.name, no: x.no, g: store.groupOf(x.sid) })),
+      });
+    }
+    // 학생의 모둠을 옮기거나(no 1~) 모둠에서 빼기(no 0)
+    if (method === 'POST' && pathname === '/api/teacher/group/assign') {
+      const b = await readBody(req, 2048);
+      const sid = normSid(b.sid);
+      const no = parseInt(b.no, 10) || 0;
+      if (!store.studentBySid(sid)) throw new HttpError(404, '학생을 찾을 수 없어요.');
+      if (no < 0 || no > (store.settings.groupCount || 8)) throw new HttpError(400, '모둠 번호가 올바르지 않아요.');
+      store.setGroup(sid, no);
+      return send(res, 200, { ok: true });
+    }
+    if (method === 'POST' && pathname === '/api/teacher/group/clear') {
+      const b = await readBody(req, 512);
+      const cls = String(b.cls || '');
+      for (const x of store.students) if (x.cls === cls && store.groupOf(x.sid)) store.setGroup(x.sid, 0);
+      return send(res, 200, { ok: true });
     }
 
     // 패들렛 연결 설정: API 키, 반별 보드 ID, 번호별 섹션 ID·소회의실 링크

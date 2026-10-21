@@ -24,7 +24,7 @@
     token: '', student: null, challenge: null, attempts: 0, last: null,
     draft: '', stats: { tries: 0, correct: 0 }, busy: false, flagged: false,
     notice: '', showHist: false, history: [], topicText: '',
-    posterOn: false, showPoster: false, showPadlet: false, padPick: '', padletTemplate: '', padlet: { post: false, link: '' }, pstate: { form: window.Poster.defaults(), out: null, lang: 'ko' }, mission: { itemId: '', copied: false, opened: false, others: false, view: '' },
+    posterOn: false, showPoster: false, showPadlet: false, padPick: '', padletTemplate: '', padlet: { post: false, link: '' }, group: null, pstate: { form: window.Poster.defaults(), out: null, lang: 'ko' }, mission: { itemId: '', copied: false, opened: false, others: false, view: '', pick: -1 },
   };
 
   function save() {
@@ -43,7 +43,7 @@
   }
   function logout(expired) {
     try { sessionStorage.removeItem(KEY); } catch (e) { /* 무시 */ }
-    Object.assign(S, { topicText: '', token: '', student: null, challenge: null, attempts: 0, last: null, draft: '', flagged: false, showHist: false, history: [], showPoster: false, pstate: { form: window.Poster.defaults(), out: null, lang: 'ko' } });
+    Object.assign(S, { group: null, topicText: '', token: '', student: null, challenge: null, attempts: 0, last: null, draft: '', flagged: false, showHist: false, history: [], showPoster: false, pstate: { form: window.Poster.defaults(), out: null, lang: 'ko' } });
     S.notice = expired ? '다시 입장해 주세요.' : '';
     render();
   }
@@ -117,12 +117,15 @@
     try {
       const me = await api('/api/me');
       S.demo = !!me.demo; S.student = me.student; S.stats = me.stats; S.history = me.history; S.posterOn = !!me.poster; S.padletTemplate = me.padletTemplate || ''; S.padlet = me.padlet || { post: false, link: '' };
+      S.group = me.group || null;
+      if (S.group && S.challenge && S.challenge.slot === undefined) S.challenge = null;   // 모둠 활동에서는 모둠 문제만 쓴다
+      if (!S.group && S.challenge && S.challenge.slot !== undefined) S.challenge = null;
       if (S.challenge) {
         if (me.topicChoice === false) { S.challenge.topicChoice = false; S.topicText = ''; }
         else if (Array.isArray(me.topicList) && me.topicList.length) { S.challenge.topicChoice = true; S.challenge.topicList = me.topicList; }
       }
     } catch (e) { render(); return; }
-    if (!S.challenge) await newChallenge(false);
+    if (!S.challenge && !S.group) await newChallenge(false);
     save();
     render();
   }
@@ -142,7 +145,15 @@
   // ---------- 공익광고 포스터 프롬프트 ----------
   const P = window.Poster;
 
+  // 모둠 활동에서 이미 완성한(또는 선생님이 확인 중인) 모둠 문장들
+  function groupSentences() {
+    const G = S.group;
+    if (!G || !G.slots) return [];
+    return G.slots.filter((x) => x.status !== 'todo').map((x) => ({ id: x.id, slot: x.i, sentence: x.sentence, topic: x.topic || '', comp: x.comp || '', struct: x.struct || '', verdict: x.status === 'done' ? 'correct' : 'pending', padletAt: x.padletAt || 0 }));
+  }
+
   function posterSentences() {
+    if (S.group) return groupSentences();
     const seen = new Set(), out = [];
     const add = (id, sentence, topic, verdict) => {
       const key = sentence + '|' + topic;
@@ -271,6 +282,7 @@
 
   // ---------- 패들렛 글 만들기 ----------
   function eligibleSentences() {
+    if (S.group) return groupSentences();
     const seen = new Set(), out = [];
     const add = (id, sentence, topic, comp, struct, verdict) => {
       const key = sentence + '|' + topic;
@@ -314,7 +326,7 @@
       h('div', { class: 'actions' },
         h('button', { class: S.padlet.post ? 'btn' : 'btn primary', type: 'button', onclick: async () => { msg.textContent = (await copyText(ta.value, ta)) ? '복사했어요! 패들렛에 붙여 넣으세요.' : '복사가 안 돼요. 위 글을 길게 눌러 직접 복사해 주세요.'; } }, '한 번에 복사하기'), msg)));
     // 패들렛 내 방에 바로 올리기 (선생님이 연결해 둔 경우)
-    const postedAt = ((S.last && S.last.id === item.id && S.last.padletAt) || (S.history.find((x) => x.id === item.id) || {}).padletAt || 0);
+    const postedAt = S.group ? (item.padletAt || 0) : ((S.last && S.last.id === item.id && S.last.padletAt) || (S.history.find((x) => x.id === item.id) || {}).padletAt || 0);
     const roomLink = S.padlet.link ? h('a', { class: 'btn' + (S.padlet.post ? '' : ' primary'), href: S.padlet.link, target: '_blank', rel: 'noopener' }, S.padlet.board ? '패들렛 보드 열기' : '내 패들렛 방 열기') : null;
     if (S.padlet.post) {
       const pmsg = h('div', { class: 'notice' + (postedAt ? ' ok' : ''), role: 'status', hidden: !postedAt }, postedAt ? '이 문장은 이미 내 패들렛 방에 올렸어요.' : '');
@@ -365,9 +377,11 @@
   function missionCard() {
     const sents = eligibleSentences();
     if (!sents.length) return null;
-    const item = sents[0];
-    if (!S.mission) S.mission = { itemId: '', copied: false, opened: false, others: false, view: '' };
+    if (!S.mission) S.mission = { itemId: '', copied: false, opened: false, others: false, view: '', pick: -1 };
     const M = S.mission, PS = S.pstate;
+    // 모둠 활동에서는 모둠 목록에서 고른 문장 하나의 미션만 보여 준다
+    const item = S.group ? sents.find((x) => x.slot === M.pick) : sents[0];
+    if (!item) return null;
     if (M.itemId !== item.id) {
       Object.assign(M, { itemId: item.id, copied: false, opened: false, others: false, view: '' });
       PS.out = null; PS.done = false;
@@ -403,6 +417,7 @@
             const o = await api('/api/padlet/post', { id: item.id, again: !!postedAt });
             if (S.last && S.last.id === item.id) S.last.padletAt = o.at || Date.now();
             const h0 = S.history.find((x) => x.id === item.id); if (h0) h0.padletAt = o.at || Date.now();
+            if (S.group) { const sl = S.group.slots.find((x) => x.i === item.slot); if (sl) sl.padletAt = o.at || Date.now(); }
             next();
           } catch (e) { msg.className = 'notice bad'; msg.textContent = e.message; btn.disabled = false; }
         });
@@ -472,13 +487,94 @@
       list.append(h('li', { class: 'mstep' + (open ? ' open' : '') + (st.done ? ' done' : '') }, head, open ? h('div', { class: 'mbody' }, body(st.id)) : null));
     });
     const finished = !firstTodo;
-    card.append(h('h2', null, '다음 미션: 포스터 만들어 올리기'),
+    card.append(...[h('h2', null, S.group ? `문장 ${item.slot + 1} 포스터 만들어 올리기` : '다음 미션: 포스터 만들어 올리기'),
+      S.group ? h('div', { class: 'actions', style: 'margin:-4px 0 6px' }, h('button', { class: 'btn sm', type: 'button', onclick: () => { M.pick = -1; save(); render(); const el = document.getElementById('group'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, '← 모둠 문장 목록으로')) : null,
       h('div', { class: 'mprog', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(steps.length), 'aria-valuenow': String(doneN) },
         h('div', { class: 'mbar', style: `width:${Math.round(doneN / steps.length * 100)}%` })),
       h('p', { class: 'muted small', style: 'margin:6px 0 10px' }, `${doneN} / ${steps.length} 단계 완료 · 위에서부터 차례대로 하나씩 하면 돼요`),
-      ...(finished ? [h('div', { class: 'notice ok' }, h('b', null, '모든 단계를 마쳤어요! '), '수고했어요. 위 단계를 눌러 다시 볼 수도 있어요.')] : []), list);
+      ...(finished ? [h('div', { class: 'notice ok' }, h('b', null, '모든 단계를 마쳤어요! '), S.group ? '수고했어요. 위의 [모둠 문장 목록으로]를 눌러 다른 문장 포스터도 만들어 보세요.' : '수고했어요. 위 단계를 눌러 다시 볼 수도 있어요.')] : []), list].filter(Boolean));
     return card;
   }
+
+  // ---------- 모둠 활동 ----------
+  const GSTATUS = { done: ['완성', 'ok'], pending: ['선생님 확인 중', 'warn'], todo: ['아직', 'gray'] };
+
+  async function startSlot(i) {
+    if (S.busy) return;
+    S.busy = true; render();
+    try {
+      const c = await api('/api/challenge', { slot: i });
+      c.slot = i;
+      S.challenge = c; S.attempts = 0; S.last = null; S.draft = ''; S.topicText = ''; S.flagged = false; S.notice = '';
+    } catch (e) { S.notice = e.message; }
+    S.busy = false; save(); render();
+    const el = document.getElementById('conds'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function backToList() {
+    S.challenge = null; S.last = null; S.draft = ''; S.topicText = ''; S.flagged = false; S.notice = ''; save(); render();
+    const el = document.getElementById('group'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  async function refreshGroup() {
+    try { const r = await api('/api/group'); S.group = r.group; } catch (e) { /* 다음 번에 */ }
+  }
+
+  function groupCard() {
+    const G = S.group;
+    const card = h('section', { class: 'card', id: 'group' });
+    card.append(h('h2', null, `${G.no}모둠`),
+      h('p', { class: 'muted small', style: 'margin:-4px 0 8px' }, '모둠원: ' + (G.members.map((m) => m.name + (m.me ? '(나)' : '')).join(', ') || '나')),
+      h('div', { class: 'mprog', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(G.total), 'aria-valuenow': String(G.done) },
+        h('div', { class: 'mbar', style: `width:${G.total ? Math.round(G.done / G.total * 100) : 0}%` })),
+      h('p', { class: 'muted small', style: 'margin:6px 0 10px' }, G.total ? `우리 모둠 문장 ${G.done} / ${G.total}개 완성 · 모둠원과 의논해서 한 문장씩 만들어요. 한 사람이 쓰고 제출하면 돼요.` : '선생님이 아직 문장 종류와 개수를 정하지 않았어요. 잠시 기다려 주세요.'));
+    const list = h('ol', { class: 'gslots' });
+    for (const sl of G.slots) {
+      const st = GSTATUS[sl.status] || GSTATUS.todo;
+      const cur = S.challenge && S.challenge.slot === sl.i && sl.status === 'todo';
+      const c = sl.conds;
+      const mine = S.group && S.mission && S.mission.pick === sl.i;
+      list.append(h('li', { class: 'gslot ' + sl.status + (cur ? ' cur' : '') },
+        h('div', { class: 'ghead' }, h('b', null, `문장 ${sl.i + 1}`), h('span', { class: 'pill ' + st[1] }, st[0]), cur ? h('span', { class: 'pill gray' }, '지금 쓰는 중') : null),
+        c ? h('div', { class: 'gconds small' }, h('span', null, c.comp.label), ' · ', h('span', null, c.struct.label), ' · ', h('span', null, '주제: ' + c.topic.label)) : null,
+        sl.status === 'todo' ? h('div', { class: 'actions' }, h('button', { class: 'btn' + (cur ? '' : ' primary'), type: 'button', disabled: S.busy || cur, onclick: () => startSlot(sl.i) }, cur ? '아래에서 쓰는 중' : (sl.tries ? '이어서 도전하기' : '이 문장 쓰기 →')),
+          sl.tries ? h('span', { class: 'muted small' }, `모둠이 ${sl.tries}번 도전했어요`) : null) : h('div', null,
+          h('div', { class: 'msent' }, sl.sentence), h('div', { class: 'muted small' }, `${sl.by}이(가) 제출`),
+          h('div', { class: 'actions' }, h('button', { class: 'btn' + (mine ? '' : ' primary'), type: 'button', onclick: () => { S.mission.pick = sl.i; save(); render(); const el = document.getElementById('mission'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, mine ? '미션 진행 중 ↓' : '이 문장으로 포스터 만들기 →'),
+            sl.status === 'done' ? h('button', { class: 'btn sm', type: 'button', disabled: S.busy || cur, onclick: () => startSlot(sl.i) }, '다시 써 보기') : null))));
+    }
+    card.append(list);
+    return card;
+  }
+
+  function renderGroupPick(top) {
+    const G = S.group;
+    const msg = h('div', { class: 'notice bad', role: 'alert', hidden: true });
+    const grid = h('div', { class: 'gpick' });
+    for (let n = 1; n <= G.count; n++) {
+      grid.append(h('button', { class: 'btn big', type: 'button', onclick: async (ev) => {
+        if (!confirm(`${n}모둠이 맞나요?\n잘못 골랐다면 선생님께 말씀드려서 옮겨야 해요.`)) return;
+        grid.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+        try { const r = await api('/api/group/join', { no: n }); S.group = r.group; save(); render(); } catch (e) { msg.textContent = e.message; msg.hidden = false; grid.querySelectorAll('button').forEach((b) => { b.disabled = false; }); }
+      } }, `${n}모둠`));
+    }
+    app.replaceChildren(top, h('section', { class: 'card' }, h('h2', null, '우리 모둠을 골라요'),
+      h('p', { class: 'muted' }, '선생님이 정해 준 우리 모둠 번호를 눌러 주세요. 한 번 고르면 바꿀 수 없어요.'), grid, msg));
+  }
+
+  // 모둠원이 제출한 결과를 모둠 화면에 가볍게 반영한다(입력 중인 칸은 건드리지 않는다)
+  let gSig = '';
+  async function pollGroup() {
+    if (!S.token || !S.group || document.hidden || S.busy) return;
+    await refreshGroup();
+    if (!S.group) { render(); return; }
+    const sig = JSON.stringify([S.group.no, S.group.members, S.group.slots.map((x) => [x.status, x.sentence, x.padletAt, x.tries])]);
+    if (sig === gSig) return;
+    gSig = sig;
+    const el = document.getElementById('group');
+    if (el && S.group.no) el.replaceWith(groupCard()); else if (!S.group.no || !el) { const t = document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName); if (!t) render(); }
+  }
+  setInterval(pollGroup, 5000);
 
   // ---------- 메인 화면 ----------
   function condRow(kind, c, cls) {
@@ -604,17 +700,18 @@
     if (r.analysis) card.append(h('details', { class: 'block' }, h('summary', null, '내 문장 분석 보기'), h('pre', null, r.analysis)));
     if (r.example) card.append(h('div', { class: 'block' }, h('div', { class: 'ttl' }, r.verdict === 'correct' ? '이런 문장도 가능해요' : '예시 문장'), h('span', { style: 'font-family:var(--serif)' }, r.example)));
 
-    const canNext = r.verdict === 'correct' || r.verdict === 'pending' || r.attempt >= 3;
+    const canNext = S.group ? true : (r.verdict === 'correct' || r.verdict === 'pending' || r.attempt >= 3);
     const actions = h('div', { class: 'actions' });
     if (r.verdict === 'incorrect') actions.append(h('button', { class: 'btn primary', type: 'button', onclick: () => document.getElementById('pad').focus() }, '고쳐서 다시 쓰기'));
-    actions.append(h('button', { class: 'btn' + (r.verdict === 'correct' ? ' primary' : ''), type: 'button', disabled: !canNext, onclick: () => newChallenge(true) }, '새 조건 받기'));
+    if (S.group) actions.append(h('button', { class: 'btn' + (r.verdict === 'correct' ? ' primary' : ''), type: 'button', onclick: backToList }, '모둠 문장 목록으로'));
+    else actions.append(h('button', { class: 'btn' + (r.verdict === 'correct' ? ' primary' : ''), type: 'button', disabled: !canNext, onclick: () => newChallenge(true) }, '새 조건 받기'));
     if (r.verdict !== 'pending' && !r.manual) {
       actions.append(S.flagged
         ? h('span', { class: 'muted small', style: 'align-self:center' }, '선생님께 전달했어요.')
         : h('button', { class: 'btn', type: 'button', onclick: flag }, '판정이 이상해요 (선생님께 알리기)'));
     }
     card.append(actions);
-    if (!canNext) card.append(h('p', { class: 'muted small', style: 'margin-top:8px' }, '3번 도전하거나 문법 조건을 맞히면 새 조건을 받을 수 있어요.'));
+    if (!canNext && !S.group) card.append(h('p', { class: 'muted small', style: 'margin-top:8px' }, '3번 도전하거나 문법 조건을 맞히면 새 조건을 받을 수 있어요.'));
     return card;
   }
 
@@ -633,9 +730,13 @@
       S.last = r; S.attempts = r.attempt; S.flagged = false;
       S.stats.tries += 1;
       if (r.verdict === 'correct') S.stats.correct += 1;
+      if (S.group) {
+        await refreshGroup();
+        if (r.verdict !== 'incorrect' && S.challenge && S.challenge.slot !== undefined) { S.mission.pick = S.challenge.slot; }
+      }
     } catch (e) {
       S.notice = e.message;
-      if (e.status === 410) { S.busy = false; await newChallenge(false); }
+      if (e.status === 410) { S.busy = false; if (S.group) { S.challenge = null; await refreshGroup(); } else await newChallenge(false); }
     }
     S.busy = false; save(); render();
     const el = document.getElementById('result');
@@ -700,15 +801,17 @@
       h('div', { class: 'brand' }, h('span', { class: 'stampbox sm' }, '제2막'), '문장 연습실', h('small', null, `문법광인의 서재 · 누적 ${S.stats.correct}/${S.stats.tries}`)),
       h('div', { class: 'chip' }, `${st.cls} ${st.name}`, h('button', { class: 'btn sm', type: 'button', onclick: () => { if (S.demo) { logout(false); location.href = 'observer.html'; } else logout(false); } }, S.demo ? '참관 화면으로' : '나가기')));
 
+    if (S.group && !S.group.no) return renderGroupPick(top);
     const nodes = [top];
     if (S.demo) nodes.push(h('div', { class: 'notice ok', role: 'note' }, h('b', null, '참관 체험 중이에요. '), '여기서 제출한 문장과 기록은 저장되지 않고, 실제 수업(교사 화면·현황판·패들렛)에는 아무 영향이 없어요.'));
     const fbCount = S.history.filter((x) => x.tfeedback).length;
     nodes.push(h('div', { class: 'actions', style: 'margin-top:0' }, h('button', { class: 'btn', type: 'button', onclick: toggleHist }, S.showHist ? '내 기록 닫기' : '내 기록 보기' + (fbCount ? ` (선생님 피드백 ${fbCount})` : ''))));
     if (S.showHist) nodes.push(histCard());
     if (S.notice) nodes.push(h('div', { class: 'notice bad', role: 'alert' }, S.notice));
+    if (S.group) nodes.push(groupCard());
     if (c) {
-      nodes.push(h('section', { class: 'card' },
-        h('h2', null, '이번 제작 조건'),
+      nodes.push(h('section', { class: 'card', id: 'conds' },
+        h('h2', null, S.group ? `문장 ${c.slot + 1}의 제작 조건 (모둠 공통)` : '이번 제작 조건'),
         h('div', { class: 'conds' },
           condRow('문장 성분', c.conditions.comp),
           condRow('문장의 짜임', c.conditions.struct),
@@ -717,6 +820,8 @@
       nodes.push(h('section', { class: 'card' },
         h('h2', null, '내 문장'), pad,
         h('div', { class: 'compose-foot' }, count, btn)));
+    } else if (S.group) {
+      // 모둠 목록에서 문장을 고르면 조건과 입력 칸이 나타난다
     } else {
       nodes.push(h('section', { class: 'card' }, h('p', null, '조건을 받지 못했어요.'),
         h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'button', onclick: () => newChallenge(true) }, '조건 받기'))));
@@ -739,6 +844,7 @@
     if (!S.token || document.hidden || S.busy) return;
     try {
       const me = await api('/api/me');
+      if (!!me.group !== !!S.group && !(document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName))) { await enter(); return; }   // 선생님이 개인/모둠 활동을 바꾼 경우
       const prevCount = S.history.filter((x) => x.tfeedback).length;
       S.history = me.history; S.stats = me.stats; S.padletTemplate = me.padletTemplate || ''; S.padlet = me.padlet || { post: false, link: '' };
       // 선생님이 '주제 바꾸기'를 켜거나 끄면 이미 받은 조건 화면에도 바로 반영한다(켠 경우에는 주제 목록도 함께 받는다)

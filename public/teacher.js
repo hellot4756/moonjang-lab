@@ -1104,9 +1104,84 @@
         h('label', { class: 'field', for: 'opw' }, '참관 비밀번호', opw),
         h('div', { class: 'toolbar' }, obsSave)));
 
+    // 모둠 활동: 모둠이 같은 조건을 받아 함께 문장·포스터를 만든다
+    const groupCard = (() => {
+      const gs = info.settings;
+      const G = { mode: !!gs.groupMode, count: gs.groupCount || 8, plan: Object.assign({}, gs.groupPlan || {}), structs: [] };
+      const msg = h('div', { hidden: true });
+      const say = (t, cls) => { msg.className = 'notice ' + cls; msg.textContent = t; msg.hidden = false; };
+      const modeRow = h('div', { class: 'chips' });
+      const countIn = h('input', { type: 'number', min: '1', max: '30', style: 'width:5rem', 'aria-label': '모둠 수' });
+      countIn.value = String(G.count);
+      const planBox = h('div', { class: 'wrap', style: 'max-width:560px' });
+      const totalEl = h('b', null, '');
+      const drawMode = () => {
+        modeRow.replaceChildren(...[[false, '개인 활동 (학생마다 다른 조건)'], [true, '모둠 활동 (모둠이 같은 조건)']].map(([v, name]) =>
+          h('button', { type: 'button', class: 'chip' + (G.mode === v ? ' on' : ''), 'aria-pressed': String(G.mode === v), onclick: () => { G.mode = v; drawMode(); } }, name)));
+      };
+      const drawPlan = () => {
+        const total = Object.values(G.plan).reduce((a, b) => a + (b || 0), 0);
+        totalEl.textContent = `모둠이 만들 문장: 모두 ${total}개`;
+        planBox.replaceChildren(...G.structs.filter((x) => !x.off || G.plan[x.id]).map((x) => {
+          const n = G.plan[x.id] || 0;
+          const set = (v) => { const nv = Math.max(0, Math.min(5, v)); const t2 = total - n + nv; if (t2 > 12) { say('한 모둠이 만들 문장은 모두 12개까지예요.', 'bad'); return; } if (nv) G.plan[x.id] = nv; else delete G.plan[x.id]; msg.hidden = true; drawPlan(); };
+          return h('div', { class: 'toolbar', style: 'align-items:center;justify-content:space-between;gap:8px;margin:4px 0' },
+            h('span', { style: 'flex:1' }, x.label),
+            h('button', { class: 'btn sm', type: 'button', 'aria-label': x.label + ' 줄이기', disabled: !n, onclick: () => set(n - 1) }, '−'),
+            h('b', { style: 'min-width:1.6rem;text-align:center' }, String(n)),
+            h('button', { class: 'btn sm', type: 'button', 'aria-label': x.label + ' 늘리기', onclick: () => set(n + 1) }, '＋'));
+        }), h('div', { style: 'margin-top:8px' }, totalEl));
+      };
+      const save = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
+        const total = Object.values(G.plan).reduce((a, b) => a + (b || 0), 0);
+        if (G.mode && !total) { say('문장 종류별 개수를 하나 이상 정해 주세요.', 'bad'); return; }
+        try {
+          T.info = await api('/api/teacher/settings', { groupMode: G.mode, groupCount: parseInt(countIn.value, 10) || 8, groupPlan: G.plan }, 'PUT');
+          G.count = parseInt(countIn.value, 10) || 8;
+          say(G.mode ? '모둠 활동으로 저장했어요. 학생은 새로고침하면 모둠 화면이 나와요.' : '개인 활동으로 저장했어요.', 'ok'); loadAssign();
+        } catch (e) { say(e.message, 'bad'); }
+      } }, '저장');
+      const reseed = h('button', { class: 'btn', type: 'button', onclick: async () => {
+        if (!confirm('모든 모둠이 새 조건을 받아요. 이미 만든 문장 기록은 남지만 모둠 화면의 진행 표시는 처음부터 다시 시작돼요. 계속할까요?')) return;
+        try { T.info = await api('/api/teacher/settings', { groupReseed: true }, 'PUT'); say('모든 모둠의 조건을 새로 뽑았어요.', 'ok'); loadAssign(); } catch (e) { say(e.message, 'bad'); }
+      } }, '조건 새로 뽑기');
+
+      // 모둠 편성(교사가 학생을 옮기거나 빼기)
+      const clsSel = h('select', { 'aria-label': '반 선택' }, h('option', { value: '' }, '반 선택'));
+      const assignBox = h('div', { class: 'wrap', style: 'max-width:none' });
+      const loadAssign = async () => {
+        if (!clsSel.value) { assignBox.replaceChildren(h('p', { class: 'muted small' }, '반을 고르면 모둠별 구성과 진행을 볼 수 있어요.')); return; }
+        try {
+          const o = await api('/api/teacher/groups?' + qs({ cls: clsSel.value }));
+          G.structs = o.structs; drawPlan();
+          const opts = (cur) => [h('option', { value: '0' }, '모둠 없음'), ...Array.from({ length: o.count }, (_, i) => h('option', { value: String(i + 1) }, `${i + 1}모둠`))].map((el) => { if (el.value === String(cur)) el.selected = true; return el; });
+          const move = async (sid, v, sel) => { try { await api('/api/teacher/group/assign', { sid, no: parseInt(v, 10) }); toast('옮겼어요.'); loadAssign(); } catch (e) { toast(e.message, true); sel.value = '0'; } };
+          assignBox.replaceChildren(
+            h('p', { class: 'muted small' }, `아직 모둠을 고르지 않은 학생 ${o.unassigned.length}명. 학생이 잘못 골랐다면 아래에서 옮겨 주세요.`),
+            h('div', { class: 'two' }, h('div', null, o.groups.map((g) => h('div', { class: 'block', style: 'margin:6px 0' },
+              h('b', null, `${g.no}모둠`), g.total ? h('span', { class: 'muted small' }, `  문장 ${g.done}/${g.total}`) : null,
+              h('div', { class: 'small' }, g.members.length ? g.members.map((m) => m.name).join(', ') : '— 아직 없음')))),
+            h('div', null, o.all.map((m) => { const sel = h('select', { 'aria-label': m.name + ' 모둠' }, opts(m.g)); sel.addEventListener('change', () => move(m.sid, sel.value, sel));
+              return h('div', { class: 'toolbar', style: 'justify-content:space-between;align-items:center;margin:3px 0' }, h('span', null, `${m.no ? m.no + '번 ' : ''}${m.name}`), sel); }),
+              h('div', { class: 'toolbar', style: 'margin-top:8px' }, h('button', { class: 'btn sm', type: 'button', onclick: async () => { if (!confirm(clsSel.value + ' 학생들의 모둠 선택을 모두 지울까요?')) return; try { await api('/api/teacher/group/clear', { cls: clsSel.value }); loadAssign(); } catch (e) { toast(e.message, true); } } }, '이 반 모둠 모두 지우기')))));
+        } catch (e) { assignBox.replaceChildren(h('p', { class: 'notice bad' }, e.message)); }
+      };
+      api('/api/teacher/overview').then((o) => { for (const c of o.classes) clsSel.append(h('option', { value: c.cls }, c.cls)); if (o.classes[0]) { clsSel.value = o.classes[0].cls; loadAssign(); } }).catch(() => {});
+      api('/api/teacher/groups').then((o) => { G.structs = o.structs; drawPlan(); }).catch(() => {});
+      clsSel.addEventListener('change', loadAssign);
+      drawMode(); drawPlan();
+      return h('section', { class: 'card' }, h('h2', null, '모둠 활동'),
+        h('p', { class: 'muted small' }, '모둠 활동으로 바꾸면 학생이 로그인 뒤 모둠 번호를 고르고, 같은 모둠은 같은 조건과 진행 화면을 함께 봐요. 문장 하나씩 포스터를 만들고, 패들렛 방은 「방 번호 = 모둠 번호」로 연결돼요(위 패들렛 연결의 번호 칸에 모둠 번호를 쓰세요).'),
+        h('div', { class: 'wrap', style: 'max-width:560px' }, h('div', { class: 'field' }, h('span', null, '활동 방식'), modeRow),
+          h('label', { class: 'field' }, '모둠 수 (반마다 같은 수)', countIn),
+          h('div', { class: 'field' }, h('span', null, '문장의 짜임 종류별로 모둠이 만들 문장 수 (조건 종류는 [조건 관리] 탭에서 바꿔요)')),),
+        planBox, h('div', { class: 'toolbar', style: 'margin-top:10px' }, save, reseed), msg,
+        h('h3', { style: 'margin-top:16px' }, '모둠 편성'), h('div', { class: 'toolbar' }, clsSel), assignBox);
+    })();
+
     const dataCard = h('section', { class: 'card' }, h('h2', null, '자료 보관'),
       h('p', { class: 'muted' }, '명단과 모든 제출 기록은 프로그램 폴더 안의 data 폴더에 저장돼요. 이 폴더를 복사해 두면 백업이 되고, 새 컴퓨터로 옮길 때도 그대로 쓸 수 있어요.'));
-    body.append(...[h('div', { class: 'two' }, classCard, modeCard), info.settings.aiMode === 'off' ? h('p', { class: 'muted small' }, 'AI 없이 선생님이 직접 판정하는 방식이라 아래 AI 연결과 판정 시험은 사용하지 않아요.') : null, h('div', { class: 'two' }, aiCard, padCard), padletCard, obsCard, tryBox, dataCard].filter(Boolean));
+    body.append(...[h('div', { class: 'two' }, classCard, modeCard), info.settings.aiMode === 'off' ? h('p', { class: 'muted small' }, 'AI 없이 선생님이 직접 판정하는 방식이라 아래 AI 연결과 판정 시험은 사용하지 않아요.') : null, h('div', { class: 'two' }, aiCard, padCard), groupCard, padletCard, obsCard, tryBox, dataCard].filter(Boolean));
   }
 
   if (T.token) start().then(() => { if (!T.info) renderLogin(); }); else renderLogin();

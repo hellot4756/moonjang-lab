@@ -518,3 +518,13 @@ body.is-gate { background: linear-gradient(180deg, #18232e 0%, #223445 60%, #162
 .mguide li::marker { font-weight: 800; color: var(--gold, #a67c2e); }
 .pmore { margin-top: 10px; border: 1px dashed var(--line); border-radius: 8px; padding: 8px 12px; }
 .pmore summary { cursor: pointer; font-weight: 700; padding: 6px 0; }
+
+/* 모둠 활동 */
+.gslots { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.gslot { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: #fff; }
+.gslot.done { background: #e9f3ee; border-color: #b9d6c6; }
+.gslot.pending { background: #fbf3e2; }
+.gslot.cur { outline: 2px solid var(--accent, #a8701f); }
+.ghead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; font-size: 1.02rem; }
+.gconds { color: var(--muted, #5b6470); margin-bottom: 6px; }
+.gpick { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; margin-top: 12px; }
