@@ -434,7 +434,7 @@
       steps.push({ id: 'make', title: '포스터 프롬프트 만들기', done: roomShared || (lead ? !!PS.out : !!outP) });
       if (!imgMode) steps.push({ id: 'copy', title: lead ? '프롬프트 복사하기' : '프롬프트 확인하기', done: roomShared || (lead ? !!M.copied : !!outP) });
     }
-    if (p2) steps.push({ id: 'room', title: imgMode ? '포스터 만들어 올리기' : S.posterOn ? '패들렛 방에서 포스터 만들어 올리기' : '내 패들렛 방으로 가기', done: roomShared || (lead && (!!PS.done || (imgMode && !!(item.posterImg && item.posterImg.posted)))) });
+    if (p2) steps.push({ id: 'room', title: imgMode ? '포스터 만들어 올리기' : S.posterOn ? '패들렛 방에서 포스터 만들어 올리기' : '내 패들렛 방으로 가기', done: roomShared || (lead && (!!PS.done || (imgMode && !!(item.posterImg && item.posterImg.posted && PS.out && item.posterImg.prompt === (PS.out.en || PS.out.ko || '').trim())))) });
     if (hasAll) steps.push({ id: 'others', title: p2 ? '다른 친구들 포스터 보기' : '다른 친구들이 올린 글 모두 보기', done: !!M.others });
     if (!steps.length) {
       return h('section', { class: 'card mission', id: 'mission' }, h('h2', null, '1차시 활동 완료'), h('div', { class: 'notice ok' }, '문장 만들기를 마쳤어요. 포스터 만들기는 2차시에 해요. 선생님이 2차시를 열면 여기에 나타나요.'));
