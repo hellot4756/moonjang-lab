@@ -514,14 +514,11 @@
           const sv = item.posterImg || null;
           const IM = (IMGS[key] = IMGS[key] || { n: 0, url: '', posted: false, busy: '', msg: '', warn: '' });
           IM.n = Math.max(IM.n, item.imgN || 0);
-          if (sv && sv.url && (!IM.url || sv.at > (IM.at || 0))) { IM.url = sv.url; IM.at = sv.at; }
+          if (sv && sv.url && (!IM.url || sv.at > (IM.at || 0))) { IM.url = sv.url; IM.at = sv.at; IM.used = sv.prompt || IM.used; }
           if (sv && sv.posted && sv.url === IM.url) IM.posted = true;
           const left = Math.max(0, mx - IM.n);
           const pic = IM.url ? h('img', { src: IM.url, alt: '만들어진 포스터', style: 'max-width:100%;max-height:360px;margin-top:6px;border-radius:8px' }) : null;
           if (!lead) return h('div', { class: 'notice' }, IM.url ? (IM.posted ? '모둠장이 만든 포스터가 패들렛에 올라갔어요.' : '모둠장이 포스터를 만드는 중이에요.') : '모둠장이 포스터를 만들면 여기에 나타나요.', pic);
-          if (IM.prompt === undefined) IM.prompt = PS.out.en || PS.out.ko || '';
-          const pta = h('textarea', { rows: 6, style: 'width:100%;margin-top:6px;font:inherit;padding:8px;border-radius:8px;border:1px solid #c9ccd4', 'aria-label': '이미지를 만들 프롬프트 (고칠 수 있어요)', disabled: IM.busy ? 'true' : null });
-          pta.value = IM.prompt; pta.addEventListener('input', () => { IM.prompt = pta.value; });
           const finish = async () => {
             if (S.group && slot && !S.demo) { try { await api('/api/group/roomdone', { id: item.id }); slot.roomDone = Date.now(); } catch (e) { /* 모둠원 화면 완료 표시는 다음에 다시 */ } }
             PS.done = true; M.view = 'room'; save();
@@ -552,11 +549,11 @@
             let ok = false;
             try {
               const o = await Promise.race([
-                api('/api/poster/image', { id: item.id, prompt: (IM.prompt || PS.out.en || PS.out.ko || '').trim() }).then((x) => ({ x }), (e) => ({ e })),
+                api('/api/poster/image', { id: item.id, prompt: (PS.out.en || PS.out.ko || '').trim() }).then((x) => ({ x }), (e) => ({ e })),
                 watcher.then((f) => (f ? { found: true } : new Promise(() => {}))),
               ]);
               if (o.e) throw o.e;
-              if (o.x) { IM.n = Math.max(IM.n + 1, mx - o.x.left); IM.url = o.x.url; IM.at = Date.now(); IM.posted = false; }
+              if (o.x) { IM.n = Math.max(IM.n + 1, mx - o.x.left); IM.url = o.x.url; IM.at = Date.now(); IM.posted = false; IM.used = (PS.out.en || PS.out.ko || '').trim(); }
               ok = true;
             } catch (e) {
               IM.warn = e.message;
@@ -567,12 +564,22 @@
           };
           const busy = !!IM.busy;
           const needPost = IM.url && !IM.posted;
+          const curP = (PS.out.en || PS.out.ko || '').trim();
+          const edited = !IM.url || (IM.used !== undefined && IM.used !== curP);   // 프롬프트를 새로 만들었으면 그 프롬프트로 다시 만들 수 있다
+          const editPrompt = async () => {
+            if (S.group && slot && !S.demo) { try { await api('/api/group/roomdone', { id: item.id, undo: true }); } catch (e) { /* 화면만 먼저 돌아간다 */ } slot.roomDone = 0; }
+            PS.done = false; M.view = 'make'; save(); redraw();
+            const el = document.getElementById('mission'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          };
+          const badge = h('div', { style: `display:inline-block;margin:6px 0;padding:6px 14px;border-radius:999px;font-weight:700;font-size:1.05rem;${left < 1 ? 'background:#fde7e5;color:#b3261e' : left === 1 ? 'background:#fff3d6;color:#8a5a00' : 'background:#e1f0e6;color:#1d6b3c'}`, role: 'status' }, `🎟 남은 횟수 ${left} / ${mx}`);
           return h('div', { class: 'notice' }, h('b', null, '🎨 프롬프트로 바로 포스터 만들기'),
-            h('p', { class: 'small', style: 'margin:4px 0' }, `한 문장당 ${mx}번까지 만들 수 있어요. 만든 그림은 자동으로 패들렛 방에 올라가요. (남은 횟수: ${left}번)`),
-            h('label', { class: 'small', style: 'display:block;margin-top:6px' }, '프롬프트 (그림이 마음에 안 들면 고친 뒤 다시 만들어 보세요)', pta),
+            h('div', null, badge),
+            h('p', { class: 'small', style: 'margin:4px 0' }, `한 문장당 ${mx}번까지 만들 수 있어요. 만든 그림은 자동으로 패들렛 방에 올라가요. 마음에 안 들면 프롬프트를 고쳐서 다시 만들어요.`),
             h('div', { class: 'actions' },
               needPost ? h('button', { class: 'btn primary', type: 'button', disabled: busy || null, onclick: postIt }, IM.busy === 'post' ? '패들렛에 올리는 중…' : '패들렛에 다시 올리기') : null,
-              h('button', { class: 'btn' + (needPost ? '' : ' primary'), type: 'button', disabled: busy || left < 1 || null, onclick: make }, IM.busy === 'make' ? '만드는 중… (10~30초)' : left < 1 ? '횟수를 모두 썼어요' : IM.url ? '그림 다시 만들기' : '이미지 만들어 올리기')),
+              edited || left < 1
+                ? h('button', { class: 'btn' + (needPost ? '' : ' primary'), type: 'button', disabled: busy || left < 1 || null, onclick: make }, IM.busy === 'make' ? '만드는 중… (10~30초)' : left < 1 ? '횟수를 모두 썼어요' : '이미지 만들어 올리기')
+                : h('button', { class: 'btn', type: 'button', disabled: busy || left < 1 || null, onclick: editPrompt }, '✏️ 프롬프트 수정하기')),
             IM.msg && !IM.warn ? h('p', { class: 'small', role: 'status' }, IM.msg) : null, IM.warn ? h('p', { class: 'small', style: 'color:#b3261e', role: 'alert' }, IM.warn) : null, pic);
         })();
         const posted = !!(imgMode && ((IMGS[String(item.id)] || {}).posted || (item.posterImg && item.posterImg.posted)));
