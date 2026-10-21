@@ -535,7 +535,7 @@ async function boardData(cls, mask) {
       }
   if (mask) for (const x of students) { x.name = (x.name || '').slice(0, 1) + '○'.repeat(Math.max(0, (x.name || '').length - 1)); x.sentence = ''; x.level = ''; }
   return {
-    students, seats: store.seats, cols: SEAT_COLS,
+    students, seats: store.seats, cols: SEAT_COLS, groupMode: groupOn(),
     classes: Object.keys(classes).sort((a, b) => a.localeCompare(b, 'ko', { numeric: true })).map((c) => ({ cls: c, count: classes[c] })),
   };
 }
@@ -569,6 +569,21 @@ async function handleApi(req, res, pathname, query) {
     const c = crypto.createHash('sha256').update(pw).digest();
     if (!crypto.timingSafeEqual(a, c)) throw new HttpError(401, '참관 비밀번호가 맞지 않아요.');
     return send(res, 200, { token: sign({ r: 'o', exp: Date.now() + 8 * HOUR }) });
+  }
+  // 참관자용 모둠 현황판: 이름은 가리고, 학생이 쓴 문장은 보내지 않는다(진행 상태만)
+  if (method === 'GET' && pathname === '/api/observer/gboard') {
+    observerAuth(req);
+    if (!store.settings.observerPassword) throw new HttpError(401, '참관 계정이 닫혔어요.');
+    let cls = query.get('cls') || '';
+    if (!cls) cls = (store.students[0] || {}).cls || '';
+    const d = await gboardData(cls);
+    const mask = (n) => (n || '').slice(0, 1) + '○'.repeat(Math.max(0, (n || '').length - 1));
+    for (const g of d.groups) {
+      for (const m of g.members) { m.name = mask(m.name); m.sid = ''; }
+      for (const x of g.slots) { x.sentence = ''; x.by = ''; x.id = ''; }
+    }
+    d.unassigned = d.unassigned.map((x) => ({ name: mask(x.name), no: x.no, online: x.online }));
+    return send(res, 200, d);
   }
   if (method === 'GET' && pathname === '/api/observer/board') {
     observerAuth(req);

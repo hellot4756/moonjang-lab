@@ -3,7 +3,7 @@
   const app = document.getElementById('app');
   const KEY = 'moonjang.observer.v1';
   const SKEY = 'moonjang.student.v1';
-  let token = '', timer = null, cls = '', filter = '';
+  let token = '', timer = null, cls = '', filter = '', view = 'solo';
   try { token = sessionStorage.getItem(KEY) || ''; } catch (e) { /* 무시 */ }
 
   function h(tag, props, ...kids) {
@@ -71,9 +71,29 @@
     const toolbar = h('div', { class: 'toolbar' });
     const legend = h('div', { class: 'blegend' });
     const grid = h('div', { id: 'board' });
-    app.replaceChildren(top, h('div', { class: 'wrap wide', style: 'max-width:none' }, note, toolbar, legend, grid));
-    let data = null;
+    const gridG = h('div', { id: 'gboard' });
+    app.replaceChildren(top, h('div', { class: 'wrap wide', style: 'max-width:none' }, note, toolbar, legend, grid, gridG));
+    let data = null, gdata = null;
+    const GST = { done: ['완성', 'ok'], doing: ['진행 중', 'blue'], idle: ['시작 전', 'gray'] };
+    const drawG = () => {
+      legend.replaceChildren(); grid.replaceChildren();
+      if (!gdata) return;
+      const cnt = { done: 0, doing: 0, idle: 0 };
+      for (const g of gdata.groups) cnt[g.state]++;
+      const online = gdata.groups.reduce((n, g) => n + g.members.filter((m) => m.online).length, 0);
+      legend.replaceChildren(...['done', 'doing', 'idle'].map((k) => h('span', { class: 'pill ' + GST[k][1], style: 'margin-right:6px' }, `${GST[k][0]} ${cnt[k]}`)), h('span', { class: 'pill gray' }, `모둠 ${gdata.groups.length}개 · 접속 ${online}명`));
+      const cards = gdata.groups.map((g) => h('div', { class: 'card gb ' + g.state },
+        h('div', { class: 'gbhead' }, h('b', null, `${gdata.cls.replace('학년 ', '-').replace('반', '')} · ${g.no}모둠`), h('span', { class: 'pill ' + GST[g.state][1] }, GST[g.state][0])),
+        h('div', { class: 'mprog' }, h('div', { class: 'mbar', style: `width:${g.total ? Math.round(g.done / g.total * 100) : 0}%` })),
+        h('div', { class: 'gbstat' }, h('b', null, `문장 ${g.done}/${g.total}`), g.pending ? ` · 확인 중 ${g.pending}` : '', ` · 도전 ${g.tries} · 오답 ${g.wrong}`),
+        h('div', { class: 'gbmem' }, g.members.map((m) => h('div', { class: 'gbm' + (m.online ? ' on' : '') },
+          h('i', { class: 'dot' + (m.typing ? ' typing' : m.online ? ' on' : '') }), h('span', null, m.name), m.leader ? h('span', { class: 'pill gray' }, '모둠장') : null, m.typing ? h('span', { class: 'muted small' }, `입력 중 ${m.draftLen}자`) : null))),
+        h('div', { class: 'gbslots small' }, g.slots.map((x) => h('span', { class: 'pill ' + (x.status === 'done' ? 'ok' : x.status === 'pending' ? 'warn' : 'gray'), style: 'margin:0 4px 4px 0' }, `문장 ${x.i + 1} ${x.status === 'done' ? '완성' : x.status === 'pending' ? '확인 중' : '아직'}`)))));
+      gridG.replaceChildren(cards.length ? h('div', { class: 'gbgrid' }, cards) : h('div', { class: 'card muted' }, '이 반에는 아직 모둠을 고른 학생이 없어요.'));
+    };
     const draw = () => {
+      if (view === 'group') { drawG(); return; }
+      gridG.replaceChildren();
       if (!data) return;
       const cnt = {};
       for (const s of data.students) cnt[s.state] = (cnt[s.state] || 0) + 1;
@@ -111,11 +131,13 @@
       return el;
     };
     const hint = h('span', { class: 'muted small' }, '3초마다 자동으로 바뀌어요');
+    const viewBtns = () => (data && data.groupMode ? [['solo', '개인 현황판'], ['group', '모둠 현황판']].map(([v, name]) => h('button', { type: 'button', class: 'chip' + (view === v ? ' on' : ''), 'aria-pressed': String(view === v), onclick: () => { view = v; if (v === 'group' && !cls && data.classes[0]) cls = data.classes[0].cls; toolbar.replaceChildren(sel(), ...viewBtns(), hint); load(); } }, name)) : []);
     const load = async () => {
       try {
         const first = !data;
         data = await api('/api/observer/board?cls=' + encodeURIComponent(cls));
-        if (first) toolbar.replaceChildren(sel(), hint);
+        if (first || (data.groupMode && !toolbar.querySelector('.chip')) || (!data.groupMode && toolbar.querySelector('.chip'))) { if (!data.groupMode) view = 'solo'; toolbar.replaceChildren(sel(), ...viewBtns(), hint); }
+        if (view === 'group') gdata = await api('/api/observer/gboard?cls=' + encodeURIComponent(cls));
         draw();
       } catch (e) { grid.replaceChildren(h('div', { class: 'notice bad' }, e.message)); }
     };
