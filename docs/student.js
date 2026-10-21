@@ -120,6 +120,7 @@
       S.group = me.group || null;
       if (S.group && S.challenge && S.challenge.slot === undefined) S.challenge = null;   // 모둠 활동에서는 모둠 문제만 쓴다
       if (!S.group && S.challenge && S.challenge.slot !== undefined) S.challenge = null;
+      if (S.group && !S.group.isLeader) S.challenge = null;
       if (S.challenge) {
         if (me.topicChoice === false) { S.challenge.topicChoice = false; S.topicText = ''; }
         else if (Array.isArray(me.topicList) && me.topicList.length) { S.challenge.topicChoice = true; S.challenge.topicList = me.topicList; }
@@ -383,14 +384,14 @@
     const item = S.group ? sents.find((x) => x.slot === M.pick) : sents[0];
     if (!item) return null;
     if (M.itemId !== item.id) {
-      Object.assign(M, { itemId: item.id, copied: false, opened: false, others: false, view: '' });
+      Object.assign(M, { itemId: item.id, copied: false, opened: false, others: false, view: '', skipPost: false });
       PS.out = null; PS.done = false;
       const F = PS.form; F.sentence = item.sentence; F.topic = item.topic || F.topic; save();
     }
     const postedAt = ((S.last && S.last.id === item.id && S.last.padletAt) || (S.history.find((x) => x.id === item.id) || {}).padletAt || 0);
     const hasAll = !!(S.padlet && S.padlet.all);
     const steps = [];
-    if (S.padlet.post) steps.push({ id: 'post', title: '내 패들렛에 광고문구 올리기', done: !!postedAt });
+    if (S.padlet.post) steps.push({ id: 'post', title: S.group ? '모둠 패들렛 방에 광고문구 올리기' : '내 패들렛에 광고문구 올리기', done: !!postedAt || !!(S.group && !S.group.isLeader && M.skipPost) });
     if (S.posterOn) {
       steps.push({ id: 'make', title: '포스터 프롬프트 만들기', done: !!PS.out });
       steps.push({ id: 'copy', title: '프롬프트 복사하기', done: !!M.copied });
@@ -407,6 +408,9 @@
     const next = () => { M.view = ''; save(); redraw(); const el = document.getElementById('mission'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
 
     const body = (id) => {
+      if (id === 'post' && S.group && !S.group.isLeader) {
+        return [h('p', { class: 'mhelp' }, `내 패들렛 방에는 모둠장(${(S.group.leader && S.group.leader.name) || ''})이 글을 올려요. 아래 문장을 확인하고 다음 단계로 가세요.`), h('div', { class: 'msent' }, item.sentence), h('div', { class: 'actions' }, h('button', { class: 'btn primary big', type: 'button', onclick: () => { M.skipPost = true; next(); } }, '다음 단계로 →'))];
+      }
       if (id === 'post') {
         const msg = h('div', { class: 'notice', role: 'status', hidden: true });
         const btn = h('button', { class: 'btn primary big', type: 'button' }, postedAt ? '다시 올리기' : '패들렛에 올리기');
@@ -524,7 +528,8 @@
     const G = S.group;
     const card = h('section', { class: 'card', id: 'group' });
     card.append(h('h2', null, `${G.no}모둠`),
-      h('p', { class: 'muted small', style: 'margin:-4px 0 8px' }, '모둠원: ' + (G.members.map((m) => m.name + (m.me ? '(나)' : '')).join(', ') || '나')),
+      h('p', { class: 'muted small', style: 'margin:-4px 0 8px' }, '모둠원: ' + (G.members.map((m) => m.name + (m.leader ? ' ★모둠장' : '') + (m.me ? '(나)' : '')).join(', ') || '나')),
+      G.isLeader ? h('div', { class: 'notice ok' }, h('b', null, '내가 모둠장이에요. '), '모둠원과 의논한 뒤 문장을 입력하고 제출하는 사람은 나예요.') : h('div', { class: 'notice' }, h('b', null, '우리 모둠 모둠장: ' + ((G.leader && G.leader.name) || '') + '. '), '문장은 모둠장만 입력해요. 이 화면을 함께 보면서 의견을 나눠 주세요. 문장이 완성되면 여기에 자동으로 나타나요.'),
       h('div', { class: 'mprog', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(G.total), 'aria-valuenow': String(G.done) },
         h('div', { class: 'mbar', style: `width:${G.total ? Math.round(G.done / G.total * 100) : 0}%` })),
       h('p', { class: 'muted small', style: 'margin:6px 0 10px' }, G.total ? `우리 모둠 문장 ${G.done} / ${G.total}개 완성 · 모둠원과 의논해서 한 문장씩 만들어요. 한 사람이 쓰고 제출하면 돼요.` : '선생님이 아직 문장 종류와 개수를 정하지 않았어요. 잠시 기다려 주세요.'));
@@ -537,11 +542,11 @@
       list.append(h('li', { class: 'gslot ' + sl.status + (cur ? ' cur' : '') },
         h('div', { class: 'ghead' }, h('b', null, `문장 ${sl.i + 1}`), h('span', { class: 'pill ' + st[1] }, st[0]), cur ? h('span', { class: 'pill gray' }, '지금 쓰는 중') : null),
         c ? h('div', { class: 'gconds small' }, h('span', null, c.comp.label), ' · ', h('span', null, c.struct.label), ' · ', h('span', null, '주제: ' + c.topic.label)) : null,
-        sl.status === 'todo' ? h('div', { class: 'actions' }, h('button', { class: 'btn' + (cur ? '' : ' primary'), type: 'button', disabled: S.busy || cur, onclick: () => startSlot(sl.i) }, cur ? '아래에서 쓰는 중' : (sl.tries ? '이어서 도전하기' : '이 문장 쓰기 →')),
+        sl.status === 'todo' && !G.isLeader ? h('div', { class: 'muted small' }, sl.tries ? `모둠이 ${sl.tries}번 도전했어요 · 모둠장이 입력하는 중이에요` : '모둠장이 입력할 차례를 기다려요') : sl.status === 'todo' ? h('div', { class: 'actions' }, h('button', { class: 'btn' + (cur ? '' : ' primary'), type: 'button', disabled: S.busy || cur, onclick: () => startSlot(sl.i) }, cur ? '아래에서 쓰는 중' : (sl.tries ? '이어서 도전하기' : '이 문장 쓰기 →')),
           sl.tries ? h('span', { class: 'muted small' }, `모둠이 ${sl.tries}번 도전했어요`) : null) : h('div', null,
-          h('div', { class: 'msent' }, sl.sentence), h('div', { class: 'muted small' }, `${sl.by}이(가) 제출`),
+          h('div', { class: 'msent' }, sl.sentence), h('div', { class: 'muted small' }, `제출: ${sl.by}`),
           h('div', { class: 'actions' }, h('button', { class: 'btn' + (mine ? '' : ' primary'), type: 'button', onclick: () => { S.mission.pick = sl.i; save(); render(); const el = document.getElementById('mission'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, mine ? '미션 진행 중 ↓' : '이 문장으로 포스터 만들기 →'),
-            sl.status === 'done' ? h('button', { class: 'btn sm', type: 'button', disabled: S.busy || cur, onclick: () => startSlot(sl.i) }, '다시 써 보기') : null))));
+            sl.status === 'done' && G.isLeader ? h('button', { class: 'btn sm', type: 'button', disabled: S.busy || cur, onclick: () => startSlot(sl.i) }, '다시 써 보기') : null))));
     }
     card.append(list);
     return card;
@@ -568,7 +573,8 @@
     if (!S.token || !S.group || document.hidden || S.busy) return;
     await refreshGroup();
     if (!S.group) { render(); return; }
-    const sig = JSON.stringify([S.group.no, S.group.members, S.group.slots.map((x) => [x.status, x.sentence, x.padletAt, x.tries])]);
+    if (S.group.no && !S.group.isLeader && S.challenge) { S.challenge = null; S.last = null; S.draft = ''; save(); gSig = ''; render(); }
+    const sig = JSON.stringify([S.group.no, S.group.isLeader, S.group.members, S.group.slots.map((x) => [x.status, x.sentence, x.padletAt, x.tries])]);
     if (sig === gSig) return;
     gSig = sig;
     const el = document.getElementById('group');

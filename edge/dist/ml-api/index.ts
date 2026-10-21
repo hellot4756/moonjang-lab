@@ -392,6 +392,8 @@ class Store {
     this.seats = this.loadSeats();   // { 반: [학번 또는 '', ...] }  교실 현황판 자리 배치(한 줄 SEAT_COLS칸)
     this.groupsFile = path.join(dir, 'groups.json');
     this.groups = this.readJson(this.groupsFile, {});   // { 학번: 모둠 번호 }
+    this.leadersFile = path.join(dir, 'leaders.json');
+    this.leaders = this.readJson(this.leadersFile, {}); // { '반|모둠번호': 모둠장 학번 } (없으면 모둠에서 번호가 가장 앞선 학생)
     this.settings = Object.assign({}, DEFAULT_SETTINGS, this.readJson(this.settingsFile, {}));
     this.secret = this.loadSecret();
     this.records = [];
@@ -488,6 +490,10 @@ class Store {
     return s;
   }
   groupOf(sid) { return Number(this.groups[sid]) || 0; }
+  setLeader(gk, sid) {
+    if (sid) this.leaders[gk] = sid; else delete this.leaders[gk];
+    this.writeJson(this.leadersFile, this.leaders);
+  }
   setGroup(sid, no) {
     if (no) this.groups[sid] = no; else delete this.groups[sid];
     this.writeJson(this.groupsFile, this.groups);
@@ -1243,6 +1249,10 @@ class DbStore extends Store {
   setGroup(sid, no) {   // 학생마다 따로 저장해서, 동시에 모둠을 고른 학생들끼리 덮어쓰지 않게 한다
     if (no) { this.groups[sid] = no; this.putKv('gm:' + sid, { no }); } else { delete this.groups[sid]; this.delKv('gm:' + sid); }
   }
+  setLeader(gk, sid) {
+    const key = 'gl:' + Buffer.from(gk, 'utf8').toString('hex');
+    if (sid) { this.leaders[gk] = sid; this.putKv(key, { sid }); } else { delete this.leaders[gk]; this.delKv(key); }
+  }
   setPadletErr(t) { this.padletErr = t || ''; this.putKv('padlet_err', { t: this.padletErr }); }
   applyKv(key, val) {
     if (key === 'roster') this.students = Array.isArray(val) ? val : [];
@@ -1251,6 +1261,7 @@ class DbStore extends Store {
     else if (key === 'conditions') C.load(val);
     else if (key === 'secret') { if (val && val.s) this.secret = val.s; }
     else if (key.startsWith('gm:')) { const sid = key.slice(3); if (val && val.no) this.groups[sid] = Number(val.no); else delete this.groups[sid]; }
+    else if (key.startsWith('gl:')) { const gk = Buffer.from(key.slice(3), 'hex').toString('utf8'); if (val && val.sid) this.leaders[gk] = String(val.sid); else delete this.leaders[gk]; }
     else if (key === 'padlet_err') this.padletErr = (val && val.t) || '';
   }
   applyLine(o) { return super.applyLine(o); }
@@ -1514,15 +1525,18 @@ function groupSlots(cls, no) {
 }
 function groupKey(st) { const no = store.groupOf(st.sid); return no ? `${st.cls}|${no}` : ''; }
 function groupMembers(cls, no) { return store.students.filter((x) => x.cls === cls && store.groupOf(x.sid) === no); }
-function groupView(st) {
-  if (!groupOn() || st.demo) return null;
-  const no = store.groupOf(st.sid);
-  const out = { count: store.settings.groupCount || 8, no, members: [], slots: [], total: 0, done: 0 };
-  if (!no) return out;
-  out.members = groupMembers(st.cls, no).map((x) => ({ name: x.name, me: x.sid === st.sid }));
-  const slots = groupSlots(st.cls, no);
-  const recs = store.records.filter((r) => r.gk === `${st.cls}|${no}`);
-  out.slots = slots.map((sl) => {
+function groupLeader(cls, no) {
+  const ms = groupMembers(cls, no);
+  if (!ms.length) return null;
+  const sid = store.leaders[`${cls}|${no}`];
+  return ms.find((x) => x.sid === sid) || ms[0];
+}
+function groupData(cls, no) {
+  const out = { no, members: groupMembers(cls, no), slots: [], total: 0, done: 0, pending: 0, tries: 0, wrong: 0, last: 0 };
+  const recs = store.records.filter((r) => r.gk === `${cls}|${no}`);
+  out.tries = recs.length; out.wrong = recs.filter((r) => finalVerdict(r) === 'incorrect').length;
+  out.last = recs.reduce((m, r) => Math.max(m, r.ts || 0), 0);
+  out.slots = groupSlots(cls, no).map((sl) => {
     const mine = recs.filter((r) => r.cid === sl.n);
     const okRec = mine.filter((r) => finalVerdict(r) === 'correct').pop() || null;
     const pend = okRec ? null : mine.filter((r) => finalVerdict(r) === 'pending').pop() || null;
@@ -1536,8 +1550,48 @@ function groupView(st) {
       comp: res ? res.comp.label : '', struct: res ? res.struct.label : '', padletAt: rec ? rec.padletAt || 0 : 0,
     };
   });
-  out.total = out.slots.length; out.done = out.slots.filter((x) => x.status !== 'todo').length;
+  out.total = out.slots.length;
+  out.done = out.slots.filter((x) => x.status === 'done').length;
+  out.pending = out.slots.filter((x) => x.status === 'pending').length;
   return out;
+}
+function groupView(st) {
+  if (!groupOn() || st.demo) return null;
+  const no = store.groupOf(st.sid);
+  const out = { count: store.settings.groupCount || 8, no, members: [], slots: [], total: 0, done: 0, leader: null, isLeader: false };
+  if (!no) return out;
+  const d = groupData(st.cls, no);
+  const ld = groupLeader(st.cls, no);
+  out.members = d.members.map((x) => ({ name: x.name, me: x.sid === st.sid, leader: !!ld && x.sid === ld.sid }));
+  out.leader = ld ? { name: ld.name, me: ld.sid === st.sid } : null;
+  out.isLeader = !!ld && ld.sid === st.sid;
+  out.slots = d.slots; out.total = d.total; out.done = d.done + d.pending;
+  return out;
+}
+function requireLeader(st) {
+  const ld = groupLeader(st.cls, store.groupOf(st.sid));
+  if (!ld || ld.sid !== st.sid) throw new HttpError(403, `문장은 모둠장${ld ? '(' + ld.name + ')' : ''}만 입력하고 제출할 수 있어요. 모둠원은 화면을 함께 보며 의견을 말해 주세요.`);
+}
+async function gboardData(cls) {
+  const { presence, activity } = await store.loadActivity();
+  const now = Date.now();
+  const count = store.settings.groupCount || 8;
+  const groups = [];
+  for (let no = 1; no <= count; no++) {
+    const d = groupData(cls, no);
+    if (!d.members.length) continue;
+    const ld = groupLeader(cls, no);
+    const members = d.members.map((m) => {
+      const online = (presence.get(m.sid) || 0) > now - 5 * 60 * 1000;
+      const a = activity.get(m.sid) || {};
+      const typing = !!a.typingAt && now - a.typingAt < 15000 && a.draftLen > 0;
+      return { sid: m.sid, name: m.name, no: m.no, online, typing, draftLen: typing ? a.draftLen : 0, leader: !!ld && ld.sid === m.sid };
+    });
+    const state = d.total && d.done === d.total ? 'done' : (d.tries || d.done || d.pending) ? 'doing' : 'idle';
+    groups.push({ no, state, total: d.total, done: d.done, pending: d.pending, tries: d.tries, wrong: d.wrong, last: d.last, members, slots: d.slots.map((x) => ({ i: x.i, status: x.status, sentence: x.sentence, by: x.by, comp: x.comp, struct: x.struct, topic: x.topic, tries: x.tries, id: x.id, padletAt: x.padletAt })) });
+  }
+  const unassigned = store.students.filter((x) => x.cls === cls && !store.groupOf(x.sid)).map((x) => ({ name: x.name, no: x.no, online: (presence.get(x.sid) || 0) > now - 5 * 60 * 1000 }));
+  return { cls, groups, unassigned, count, planTotal: Object.values(store.settings.groupPlan || {}).reduce((a, b) => a + b, 0) };
 }
 function padletFor(st) {
   const { cfg, room } = padletRoom(st);
@@ -1786,6 +1840,7 @@ async function handleApi(req, res, pathname, query) {
       const b0 = await readBody(req, 512);
       gk = groupKey(st);
       if (!gk) throw new HttpError(400, '먼저 모둠을 골라 주세요.');
+      requireLeader(st);
       const sl = groupSlots(st.cls, store.groupOf(st.sid))[parseInt(b0.slot, 10)];
       if (!sl) throw new HttpError(400, '모둠 문제를 찾을 수 없어요. 화면을 새로고침해 주세요.');
       ids = sl.ids; cid = sl.n;
@@ -1830,6 +1885,7 @@ async function handleApi(req, res, pathname, query) {
     const rec = store.getRecord(String(b.id || ''));
     if (!rec || (rec.sid !== st.sid && !(rec.gk && rec.gk === groupKey(st)))) throw new HttpError(404, '올릴 문장을 찾지 못했어요.');
     if (finalVerdict(rec) === 'incorrect') throw new HttpError(400, '문법 조건을 맞힌 문장만 올릴 수 있어요.');
+    if (rec.gk) requireLeader(st);
     if (rec.padletAt && !b.again) return send(res, 200, { ok: true, already: true, at: rec.padletAt });
     const gno = rec.gk ? store.groupOf(st.sid) : 0;
     const who = gno ? `${gno}모둠 (${groupMembers(st.cls, gno).map((x) => x.name).join(', ')})` : st.name;
@@ -1860,6 +1916,7 @@ async function handleApi(req, res, pathname, query) {
     if (!/[가-힣]/.test(sentence)) throw new HttpError(400, '한글로 문장을 써 주세요.');
     if (rateLimited('submit:' + (st.demo ? 'demo:' + ip : st.sid), st.demo ? 20 : 12, 60 * 1000)) throw new HttpError(429, '너무 빨리 제출하고 있어요. 잠시 뒤에 다시 제출해 주세요.');
     if (ch.g && ch.g !== groupKey(st)) throw new HttpError(410, '모둠이 바뀌었어요. 모둠 화면에서 다시 시작해 주세요.');
+    if (ch.g) requireLeader(st);
     const attempt = st.demo ? (demoTries.set(ch.n, (demoTries.get(ch.n) || 0) + 1), demoTries.get(ch.n)) : store.records.filter((r) => r.cid === ch.n && (ch.g || r.sid === st.sid)).length + 1;
     if (attempt > 25) throw new HttpError(429, '이 조건으로는 충분히 도전했어요. 새 조건을 받아 주세요.');
     const wanted = store.settings.topicChoice === false ? '' : String(b.topicText || '').replace(/\s+/g, ' ').trim();
@@ -1966,7 +2023,8 @@ async function handleApi(req, res, pathname, query) {
       const students = store.students.filter((x) => !cls || x.cls === cls);
       const groups = [];
       for (let no = 1; no <= count; no++) {
-        const members = students.filter((x) => store.groupOf(x.sid) === no).map((x) => ({ sid: x.sid, name: x.name, no: x.no }));
+        const ld0 = cls ? groupLeader(cls, no) : null;
+        const members = students.filter((x) => store.groupOf(x.sid) === no).map((x) => ({ sid: x.sid, name: x.name, no: x.no, leader: !!ld0 && ld0.sid === x.sid }));
         let done = 0, total = 0;
         if (cls && members.length) { const v = groupView({ sid: members[0].sid, cls, name: '' }); total = v.total; done = v.slots.filter((x) => x.status === 'done').length; }
         groups.push({ no, members, done, total });
@@ -1975,7 +2033,7 @@ async function handleApi(req, res, pathname, query) {
         count, mode: groupOn(), plan, planTotal: Object.values(plan).reduce((a, b) => a + b, 0),
         structs: C.snapshot().structs.map((x) => ({ id: x.id, label: x.label, level: x.level, off: !!x.off })),
         groups, unassigned: students.filter((x) => !store.groupOf(x.sid)).map((x) => ({ sid: x.sid, name: x.name, no: x.no })),
-        all: students.map((x) => ({ sid: x.sid, name: x.name, no: x.no, g: store.groupOf(x.sid) })),
+        all: students.map((x) => ({ sid: x.sid, name: x.name, no: x.no, g: store.groupOf(x.sid), leader: !!store.groupOf(x.sid) && !!groupLeader(x.cls, store.groupOf(x.sid)) && groupLeader(x.cls, store.groupOf(x.sid)).sid === x.sid })),
       });
     }
     if (method === 'POST' && pathname === '/api/teacher/group/assign') {
@@ -1986,6 +2044,20 @@ async function handleApi(req, res, pathname, query) {
       if (no < 0 || no > (store.settings.groupCount || 8)) throw new HttpError(400, '모둠 번호가 올바르지 않아요.');
       store.setGroup(sid, no);
       return send(res, 200, { ok: true });
+    }
+    if (method === 'POST' && pathname === '/api/teacher/group/leader') {
+      const b = await readBody(req, 512);
+      const sid = normSid(b.sid);
+      const stu = store.studentBySid(sid);
+      const no = stu ? store.groupOf(sid) : 0;
+      if (!stu || !no) throw new HttpError(400, '모둠에 들어 있는 학생만 모둠장이 될 수 있어요.');
+      store.setLeader(`${stu.cls}|${no}`, sid);
+      return send(res, 200, { ok: true });
+    }
+    if (method === 'GET' && pathname === '/api/teacher/gboard') {
+      const cls = query.get('cls') || '';
+      if (!cls) throw new HttpError(400, '반을 선택해 주세요.');
+      return send(res, 200, await gboardData(cls));
     }
     if (method === 'POST' && pathname === '/api/teacher/group/clear') {
       const b = await readBody(req, 512);
@@ -2154,6 +2226,7 @@ async function handleApi(req, res, pathname, query) {
       const verdict = query.get('verdict') || '';
       const topicF = query.get('topic') || '';
       const fbF = query.get('fb') || '';
+      const gnoF = parseInt(query.get('gno'), 10) || 0;
       const before = parseInt(query.get('before'), 10) || Infinity;
       const limit = Math.min(parseInt(query.get('limit'), 10) || 100, 500);
       const out = [];
@@ -2162,6 +2235,7 @@ async function handleApi(req, res, pathname, query) {
         if (r.ts >= before || r.ts < since) continue;
         if (cls && r.cls !== cls) continue;
         if (sid && r.sid !== sid) continue;
+        if (gnoF && r.gno !== gnoF) continue;
         const v = finalVerdict(r);
         if (verdict === 'review') { if (!needsReview(r)) continue; }
         else if (verdict && v !== verdict) continue;

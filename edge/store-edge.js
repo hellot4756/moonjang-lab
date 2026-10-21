@@ -63,6 +63,10 @@ class DbStore extends Store {
   setGroup(sid, no) {   // 학생마다 따로 저장해서, 동시에 모둠을 고른 학생들끼리 덮어쓰지 않게 한다
     if (no) { this.groups[sid] = no; this.putKv('gm:' + sid, { no }); } else { delete this.groups[sid]; this.delKv('gm:' + sid); }
   }
+  setLeader(gk, sid) {
+    const key = 'gl:' + Buffer.from(gk, 'utf8').toString('hex');
+    if (sid) { this.leaders[gk] = sid; this.putKv(key, { sid }); } else { delete this.leaders[gk]; this.delKv(key); }
+  }
   setPadletErr(t) { this.padletErr = t || ''; this.putKv('padlet_err', { t: this.padletErr }); }
 
   applyKv(key, val) {
@@ -72,6 +76,7 @@ class DbStore extends Store {
     else if (key === 'conditions') C.load(val);
     else if (key === 'secret') { if (val && val.s) this.secret = val.s; }
     else if (key.startsWith('gm:')) { const sid = key.slice(3); if (val && val.no) this.groups[sid] = Number(val.no); else delete this.groups[sid]; }
+    else if (key.startsWith('gl:')) { const gk = Buffer.from(key.slice(3), 'hex').toString('utf8'); if (val && val.sid) this.leaders[gk] = String(val.sid); else delete this.leaders[gk]; }
     else if (key === 'padlet_err') this.padletErr = (val && val.t) || '';
   }
 

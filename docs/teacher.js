@@ -21,12 +21,12 @@
 
   const T = {
     token: '', info: null, tab: 'status', cls: '', period: 'all', verdict: '', auto: true,
-    timer: null, boardF: '', seatEdit: false, conds: null, drawer: null, dirty: false, topicF: '', fbF: '', fbDirty: false,
+    timer: null, boardF: '', seatEdit: false, conds: null, drawer: null, dirty: false, topicF: '', fbF: '', fbDirty: false, gnoF: '',
   };
   try { T.token = sessionStorage.getItem(KEY) || ''; } catch (e) { /* 무시 */ }
   // 새로고침해도 보던 탭과 반 선택을 그대로 유지한다
   const VKEY = 'moonjang.teacher.view.v1';
-  const TAB_IDS = ['status', 'board', 'records', 'roster', 'conds', 'posters', 'settings'];
+  const TAB_IDS = ['status', 'board', 'gboard', 'records', 'roster', 'conds', 'posters', 'settings'];
   try {
     const v = JSON.parse(sessionStorage.getItem(VKEY) || 'null');
     if (v && TAB_IDS.includes(v.tab)) T.tab = v.tab;
@@ -112,7 +112,9 @@
       h('div', { class: 'brand' }, h('span', { class: 'stampbox sm' }, '제2막'), '문장 연습실', h('small', null, '문법광인의 서재 · 교사 화면')),
       h('button', { class: 'btn sm', type: 'button', onclick: logout }, '로그아웃'));
     const tabs = h('div', { class: 'tabs', role: 'tablist' });
-    for (const [id, name] of TABS) {
+    const gOn = !!(T.info && T.info.settings && T.info.settings.groupMode);
+    if (T.tab === 'gboard' && !gOn) T.tab = 'board';
+    for (const [id, name] of TABS.flatMap((x) => (x[0] === 'board' && gOn ? [x, ['gboard', '모둠 현황판']] : [x]))) {
       tabs.append(h('button', {
         class: 'tab', role: 'tab', 'aria-selected': String(T.tab === id), 'data-tab': id,
         onclick: () => {
@@ -127,6 +129,7 @@
     clearInterval(T.timer);
     if (T.tab === 'status') showStatus(body);
     else if (T.tab === 'board') showBoard(body);
+    else if (T.tab === 'gboard') showGBoard(body);
     else if (T.tab === 'records') showRecords(body);
     else if (T.tab === 'roster') showRoster(body);
     else if (T.tab === 'conds') showConditions(body);
@@ -400,6 +403,7 @@
       r.override ? h('span', { class: 'pill gray' }, r.manual ? '교사 판정' : 'AI는 ' + (VERDICT[r.verdict] || ['?'])[0] + ' → 교사 수정') : null,
       r.confidence === 'low' ? h('span', { class: 'pill warn' }, 'AI 확신 낮음') : null,
       r.flagged ? h('span', { class: 'pill warn' }, '학생이 확인 요청') : null,
+      r.gno ? h('span', { class: 'pill blue' }, `${r.gno}모둠`) : null,
       h('b', null, `${r.cls} ${r.name}`), h('span', { class: 'muted small' }, `${r.sid} · ${fmt(r.ts)} · ${r.attempt}번째`));
     const card = h('div', { class: 'card rec' }, head,
       h('div', { class: 'conds-line' }, `성분: ${r.compLabel} / 짜임: ${r.structLabel} / 주제: ${r.topicLabel}${r.topicCustom ? ' (학생이 고름)' : ''}`));
@@ -472,6 +476,51 @@
   }
 
   // ---------- 제출 모아보기 ----------
+  // ---------- 모둠 현황판 ----------
+  const GSTATE = { done: ['완성', 'ok'], doing: ['진행 중', 'blue'], idle: ['시작 전', 'gray'] };
+  function showGBoard(body) {
+    const box = h('div', { id: 'gboard' });
+    const sum = h('div', { class: 'toolbar' });
+    const load = async () => {
+      if (!T.cls) {
+        const first = (T.classes || [])[0];
+        if (first) T.cls = first.cls;
+        else { box.replaceChildren(h('div', { class: 'card muted' }, '위에서 반을 먼저 골라 주세요.')); return; }
+      }
+      try {
+        const o = await api('/api/teacher/gboard?' + qs({ cls: T.cls }));
+        const cnt = { done: 0, doing: 0, idle: 0 };
+        for (const g of o.groups) cnt[g.state]++;
+        const online = o.groups.reduce((n, g) => n + g.members.filter((m) => m.online).length, 0);
+        sum.replaceChildren(...[...[['done', '완성'], ['doing', '진행'], ['idle', '시작 전']].map(([k, name]) => h('span', { class: 'pill ' + GSTATE[k][1] }, `${name} ${cnt[k]}`)),
+          h('span', { class: 'pill gray' }, `모둠 ${o.groups.length}개 · 접속 ${online}명`),
+          ...(o.unassigned.length ? [h('span', { class: 'pill warn', title: o.unassigned.map((x) => x.name).join(', ') }, `모둠 없음 ${o.unassigned.length}명`)] : [])]);
+        const cards = o.groups.map((g) => {
+          const st = GSTATE[g.state];
+          const pct = g.total ? Math.round(g.done / g.total * 100) : 0;
+          return h('div', { class: 'card gb ' + g.state },
+            h('div', { class: 'gbhead' }, h('b', null, `${T.cls.replace('학년 ', '-').replace('반', '')} · ${g.no}모둠`), h('span', { class: 'pill ' + st[1] }, st[0])),
+            h('div', { class: 'mprog' }, h('div', { class: 'mbar', style: `width:${pct}%` })),
+            h('div', { class: 'gbstat' }, h('b', null, `문장 ${g.done}/${g.total}`), g.pending ? ` · 확인 중 ${g.pending}` : '', ` · 도전 ${g.tries} · 오답 ${g.wrong}`),
+            h('div', { class: 'gbmem' }, g.members.map((m) => h('div', { class: 'gbm' + (m.online ? ' on' : '') },
+              h('i', { class: 'dot' + (m.typing ? ' typing' : m.online ? ' on' : '') }), h('span', null, m.name), m.leader ? h('span', { class: 'pill gray' }, '모둠장') : null,
+              m.typing ? h('span', { class: 'muted small' }, `입력 중 ${m.draftLen}자`) : null))),
+            h('details', { class: 'small' }, h('summary', null, '문장 보기'),
+              g.slots.map((x) => h('div', { class: 'gbslot ' + x.status },
+                h('b', null, `문장 ${x.i + 1}`), ' ', h('span', { class: 'muted' }, `${x.struct || ''} · ${x.topic || ''}`),
+                x.status === 'todo' ? h('div', { class: 'muted' }, x.tries ? `아직 (도전 ${x.tries}번)` : '아직') : h('div', { style: 'font-family:var(--serif)' }, x.sentence, h('span', { class: 'muted small' }, `  — ${x.by}`), x.status === 'pending' ? h('span', { class: 'pill warn' }, '확인 중') : null, x.padletAt ? h('span', { class: 'pill gray' }, '패들렛 올림') : null)))),
+            h('div', { class: 'toolbar' }, h('button', { class: 'btn sm', type: 'button', onclick: () => { T.gnoF = String(g.no); T.tab = 'records'; renderShell(); } }, '이 모둠 제출 보기')));
+        });
+        box.replaceChildren(...(cards.length ? [h('div', { class: 'gbgrid' }, cards)] : [h('div', { class: 'card muted' }, '이 반에는 아직 모둠을 고른 학생이 없어요.')]));
+      } catch (e) { box.replaceChildren(h('div', { class: 'notice bad' }, e.message)); }
+    };
+    const tb = h('div', { class: 'toolbar' }, classSelect(() => load()), sum);
+    body.append(tb, box);
+    api('/api/teacher/overview').then((o) => { T.classes = o.classes; if (!T.cls && o.classes[0]) T.cls = o.classes[0].cls; tb.replaceChild(classSelect(() => load()), tb.firstChild); load(); }).catch(() => {});
+    clearInterval(T.timer);
+    T.timer = setInterval(() => { if (!document.hidden) load(); }, 4000);
+  }
+
   function showRecords(body) {
     const list = h('div', { class: 'wrap wide', style: 'max-width:none' });
     let recs = [];
@@ -480,13 +529,19 @@
     const draw = () => {
       list.replaceChildren();
       if (!recs.length) list.append(h('div', { class: 'card muted' }, '조건에 맞는 제출이 없어요.'));
-      for (const r of recs) list.append(recCard(r, (upd) => { if (upd) { const i = recs.findIndex((x) => x.id === r.id); recs[i] = upd; draw(); } else load(); }));
+      const gOn = !!(T.info && T.info.settings && T.info.settings.groupMode);
+      const view = gOn && !T.gnoF ? recs.slice().sort((a, b) => ((a.gno || 999) - (b.gno || 999)) || (b.ts - a.ts)) : recs;
+      let lastG = -1;
+      for (const r of view) {
+        if (gOn && !T.gnoF && (r.gno || 0) !== lastG) { lastG = r.gno || 0; list.append(h('h3', { class: 'btitle', style: 'margin:14px 0 4px' }, lastG ? `${lastG}모둠` : '개인(모둠 없이 제출)')); }
+        list.append(recCard(r, (upd) => { if (upd) { const i = recs.findIndex((x) => x.id === r.id); recs[i] = upd; draw(); } else load(); }));
+      }
       moreBtn.hidden = !more;
     };
     const load = async (append) => {
       try {
         const before = append && recs.length ? recs[recs.length - 1].ts : '';
-        const o = await api('/api/teacher/records?' + qs({ cls: T.cls, period: T.period, verdict: T.verdict, limit: 50, before, topic: T.topicF, fb: T.fbF }));
+        const o = await api('/api/teacher/records?' + qs({ cls: T.cls, period: T.period, verdict: T.verdict, limit: 50, before, topic: T.topicF, fb: T.fbF, gno: T.gnoF }));
         recs = append ? recs.concat(o.records) : o.records;
         more = o.records.length === 50;
         draw();
@@ -513,6 +568,10 @@
       h('option', { value: '' }, '피드백 전체'), h('option', { value: 'none' }, '피드백 없음'), h('option', { value: 'has' }, '피드백 있음'));
     fsel.value = T.fbF;
     fsel.addEventListener('change', () => { T.fbF = fsel.value; load(); });
+    const gsel = h('select', { 'aria-label': '모둠 선택' }, h('option', { value: '' }, '모든 모둠'),
+      ...Array.from({ length: (T.info && T.info.settings && T.info.settings.groupCount) || 8 }, (_, i) => h('option', { value: String(i + 1) }, `${i + 1}모둠`)));
+    gsel.value = T.gnoF;
+    gsel.addEventListener('change', () => { T.gnoF = gsel.value; load(); });
     const bulkOk = h('button', { class: 'btn sm', type: 'button', onclick: async () => {
       const ids = recs.filter((x) => !x.topicJudge).map((x) => x.id);
       if (!ids.length) { toast('주제 판단이 필요한 기록이 없어요.', true); return; }
@@ -531,7 +590,7 @@
       if (!confirm(`정말 ${T.cls} 전체를 지울까요? 한 번 더 확인해요.`)) return;
       try { const o = await api('/api/teacher/class/reset', { cls: T.cls }); toast(`${T.cls}: ${o.deleted}건을 지웠어요.`); load(); } catch (e) { toast(e.message, true); }
     } }, '이 반 기록 모두 지우기');
-    const tb = h('div', { class: 'toolbar' }, classSelect(() => load()), vsel, tsel, fsel, periodSelect(() => load()), autoBox(() => load()), h('span', { class: 'spacer' }), bulkOk, regradeAll, delShown, delClass);
+    const tb = h('div', { class: 'toolbar' }, classSelect(() => load()), vsel, tsel, fsel, (T.info && T.info.settings && T.info.settings.groupMode) ? gsel : null, periodSelect(() => load()), autoBox(() => load()), h('span', { class: 'spacer' }), bulkOk, regradeAll, delShown, delClass);
     body.append(tb, list, moreBtn);
     api('/api/teacher/overview').then((o) => { T.classes = o.classes; tb.replaceChild(classSelect(() => load()), tb.firstChild); }).catch(() => {});
     load();
@@ -1157,12 +1216,13 @@
           const opts = (cur) => [h('option', { value: '0' }, '모둠 없음'), ...Array.from({ length: o.count }, (_, i) => h('option', { value: String(i + 1) }, `${i + 1}모둠`))].map((el) => { if (el.value === String(cur)) el.selected = true; return el; });
           const move = async (sid, v, sel) => { try { await api('/api/teacher/group/assign', { sid, no: parseInt(v, 10) }); toast('옮겼어요.'); loadAssign(); } catch (e) { toast(e.message, true); sel.value = '0'; } };
           assignBox.replaceChildren(
-            h('p', { class: 'muted small' }, `아직 모둠을 고르지 않은 학생 ${o.unassigned.length}명. 학생이 잘못 골랐다면 아래에서 옮겨 주세요.`),
+            h('p', { class: 'muted small' }, `아직 모둠을 고르지 않은 학생 ${o.unassigned.length}명. 학생이 잘못 골랐다면 아래에서 옮겨 주세요. 모둠장은 따로 정하지 않으면 모둠에서 번호가 가장 앞선 학생이에요.`),
             h('div', { class: 'two' }, h('div', null, o.groups.map((g) => h('div', { class: 'block', style: 'margin:6px 0' },
               h('b', null, `${g.no}모둠`), g.total ? h('span', { class: 'muted small' }, `  문장 ${g.done}/${g.total}`) : null,
-              h('div', { class: 'small' }, g.members.length ? g.members.map((m) => m.name).join(', ') : '— 아직 없음')))),
+              h('div', { class: 'small' }, g.members.length ? g.members.map((m) => m.name + (m.leader ? '★' : '')).join(', ') : '— 아직 없음')))),
             h('div', null, o.all.map((m) => { const sel = h('select', { 'aria-label': m.name + ' 모둠' }, opts(m.g)); sel.addEventListener('change', () => move(m.sid, sel.value, sel));
-              return h('div', { class: 'toolbar', style: 'justify-content:space-between;align-items:center;margin:3px 0' }, h('span', null, `${m.no ? m.no + '번 ' : ''}${m.name}`), sel); }),
+              return h('div', { class: 'toolbar', style: 'justify-content:space-between;align-items:center;margin:3px 0' }, h('span', null, `${m.no ? m.no + '번 ' : ''}${m.name}`, m.leader ? h('span', { class: 'pill gray', style: 'margin-left:6px' }, '모둠장') : null),
+                h('span', { class: 'toolbar', style: 'margin:0;gap:6px' }, m.g && !m.leader ? h('button', { class: 'btn sm', type: 'button', onclick: async () => { try { await api('/api/teacher/group/leader', { sid: m.sid }); toast(`${m.name}을(를) 모둠장으로 정했어요.`); loadAssign(); } catch (e) { toast(e.message, true); } } }, '모둠장으로') : null, sel)); }),
               h('div', { class: 'toolbar', style: 'margin-top:8px' }, h('button', { class: 'btn sm', type: 'button', onclick: async () => { if (!confirm(clsSel.value + ' 학생들의 모둠 선택을 모두 지울까요?')) return; try { await api('/api/teacher/group/clear', { cls: clsSel.value }); loadAssign(); } catch (e) { toast(e.message, true); } } }, '이 반 모둠 모두 지우기')))));
         } catch (e) { assignBox.replaceChildren(h('p', { class: 'notice bad' }, e.message)); }
       };
