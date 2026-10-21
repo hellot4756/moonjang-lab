@@ -180,6 +180,16 @@
       .replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
   }
 
-  const api = { OPTIONS, TEXT_FIELDS, defaults, build, DEFAULT_PADLET, PADLET_TOKENS, fillTemplate };
+  // 모둠 활동 패들렛 글: 제목 = 광고문구, 본문 = 모둠·모둠원 / 문법 조건 / 주제
+  function groupPadlet(v) {
+    const one = (x) => String(x == null ? '' : x).replace(/\s+/g, ' ').trim();
+    const cond = [one(v.comp), one(v.struct)].filter(Boolean).join(' + ');
+    return {
+      subject: one(v.sentence),
+      body: `-${v.no}모둠: ${(v.names || []).map(one).filter(Boolean).join(', ')}\n-문법 조건: ${cond}\n-주제: ${one(v.topic)}`,
+    };
+  }
+
+  const api = { groupPadlet, OPTIONS, TEXT_FIELDS, defaults, build, DEFAULT_PADLET, PADLET_TOKENS, fillTemplate };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Poster = api;
 })(typeof window !== 'undefined' ? window : globalThis);

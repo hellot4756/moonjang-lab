@@ -288,6 +288,7 @@ function groupData(cls, no) {
       status: okRec ? 'done' : pend ? 'pending' : 'todo',
       id: rec ? rec.id : '', sentence: rec ? rec.sentence : '', by: rec ? rec.name : '', topic: rec ? rec.topicLabel : (view ? view.topic.label : ''),
       comp: res ? res.comp.label : '', struct: res ? res.struct.label : '', padletAt: rec ? rec.padletAt || 0 : 0,
+      poster: rec && rec.poster ? rec.poster : null, roomDone: rec ? rec.roomDone || 0 : 0,
     };
   });
   out.total = out.slots.length;
@@ -669,6 +670,18 @@ async function handleApi(req, res, pathname, query) {
     return send(res, 200, { group: groupView(st) });
   }
 
+  // 모둠장이 [포스터를 올렸어요]를 누르면 모둠원 화면도 그 단계까지 끝난 것으로 보인다
+  if (method === 'POST' && pathname === '/api/group/roomdone') {
+    const st = studentAuth(req);
+    if (st.demo || !groupOn()) throw new HttpError(400, '지금은 모둠 활동이 아니에요.');
+    requireLeader(st);
+    const b = await readBody(req, 256);
+    const rec = store.getRecord(String(b.id || ''));
+    if (!rec || !rec.gk || rec.gk !== groupKey(st)) throw new HttpError(404, '문장을 찾을 수 없어요.');
+    store.patchRecord(rec.id, { roomDone: b.undo ? 0 : Date.now() });
+    return send(res, 200, { ok: true });
+  }
+
   // 학생의 광고문구를 그 학생 번호의 패들렛 섹션(소회의실)에 글로 올린다. 올릴 곳은 서버가 번호로 정하고, 글도 서버의 기록으로 만든다.
   if (method === 'POST' && pathname === '/api/padlet/post') {
     const st = studentAuth(req);
@@ -683,11 +696,11 @@ async function handleApi(req, res, pathname, query) {
     if (rec.gk) requireLeader(st);
     if (rec.padletAt && !b.again) return send(res, 200, { ok: true, already: true, at: rec.padletAt });
     const gno = rec.gk ? store.groupOf(st.sid) : 0;
-    const who = gno ? `${gno}모둠 (${groupMembers(st.cls, gno).map((x) => x.name).join(', ')})` : st.name;
-    const text = PosterLib.fillTemplate(store.settings.padletTemplate, {
-      '이름': who, '학번': gno ? '' : st.sid, '반': st.cls, '광고문구': rec.sentence, '성분조건': rec.compLabel, '짜임조건': rec.structLabel, '주제': rec.topicLabel,
+    const gp = gno ? PosterLib.groupPadlet({ no: gno, names: groupMembers(st.cls, gno).map((x) => x.name), comp: rec.compLabel, struct: rec.structLabel, topic: rec.topicLabel, sentence: rec.sentence }) : null;
+    const text = gp ? gp.body : PosterLib.fillTemplate(store.settings.padletTemplate, {
+      '이름': st.name, '학번': st.sid, '반': st.cls, '광고문구': rec.sentence, '성분조건': rec.compLabel, '짜임조건': rec.structLabel, '주제': rec.topicLabel,
     });
-    const out = await PADLET.createPost({ key: store.settings.padletApiKey, boardId: cfg.boardId, section: room.section, subject: gno ? `${gno}모둠` : `${st.no ? st.no + '번 ' : ''}${st.name}`, body: text });
+    const out = await PADLET.createPost({ key: store.settings.padletApiKey, boardId: cfg.boardId, section: room.section, subject: gp ? gp.subject : `${st.no ? st.no + '번 ' : ''}${st.name}`, body: text });
     if (!out.ok) {
       padletLastError = `${new Date().toLocaleTimeString('ko-KR')} ${st.cls} ${st.no}번: ${out.status || '연결 실패'} ${out.detail || ''}`.slice(0, 300);
       console.log('[패들렛 오류]', padletLastError);
@@ -765,6 +778,12 @@ async function handleApi(req, res, pathname, query) {
     const opts = {};
     if (b.opts && typeof b.opts === 'object') {
       for (const [k, v] of Object.entries(b.opts).slice(0, 30)) if (typeof v === 'string') opts[String(k).slice(0, 20)] = v.slice(0, 300);
+    }
+    if (groupOn() && b.recId) {   // 모둠: 포스터 선택·만들기는 모둠장만. 선택 내용은 문장 기록에 붙여 모둠원 화면에 보여 준다
+      requireLeader(st);
+      const rec = store.getRecord(String(b.recId));
+      if (!rec || !rec.gk || rec.gk !== groupKey(st)) throw new HttpError(404, '문장을 찾을 수 없어요.');
+      store.patchRecord(rec.id, { poster: { opts, prompt, promptEn: String(b.promptEn || '').trim().slice(0, 4000), by: st.name, at: Date.now() }, roomDone: 0 });
     }
     const p = store.addPoster({
       ts: Date.now(), sid: st.sid, name: st.name, cls: st.cls,
