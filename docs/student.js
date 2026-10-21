@@ -519,6 +519,9 @@
           const left = Math.max(0, mx - IM.n);
           const pic = IM.url ? h('img', { src: IM.url, alt: '만들어진 포스터', style: 'max-width:100%;max-height:360px;margin-top:6px;border-radius:8px' }) : null;
           if (!lead) return h('div', { class: 'notice' }, IM.url ? (IM.posted ? '모둠장이 만든 포스터가 패들렛에 올라갔어요.' : '모둠장이 포스터를 만드는 중이에요.') : '모둠장이 포스터를 만들면 여기에 나타나요.', pic);
+          if (IM.prompt === undefined) IM.prompt = PS.out.en || PS.out.ko || '';
+          const pta = h('textarea', { rows: 6, style: 'width:100%;margin-top:6px;font:inherit;padding:8px;border-radius:8px;border:1px solid #c9ccd4', 'aria-label': '이미지를 만들 프롬프트 (고칠 수 있어요)', disabled: IM.busy ? 'true' : null });
+          pta.value = IM.prompt; pta.addEventListener('input', () => { IM.prompt = pta.value; });
           const finish = async () => {
             if (S.group && slot && !S.demo) { try { await api('/api/group/roomdone', { id: item.id }); slot.roomDone = Date.now(); } catch (e) { /* 모둠원 화면 완료 표시는 다음에 다시 */ } }
             PS.done = true; M.view = 'room'; save();
@@ -549,7 +552,7 @@
             let ok = false;
             try {
               const o = await Promise.race([
-                api('/api/poster/image', { id: item.id, prompt: PS.out.en || PS.out.ko }).then((x) => ({ x }), (e) => ({ e })),
+                api('/api/poster/image', { id: item.id, prompt: (IM.prompt || PS.out.en || PS.out.ko || '').trim() }).then((x) => ({ x }), (e) => ({ e })),
                 watcher.then((f) => (f ? { found: true } : new Promise(() => {}))),
               ]);
               if (o.e) throw o.e;
@@ -566,6 +569,7 @@
           const needPost = IM.url && !IM.posted;
           return h('div', { class: 'notice' }, h('b', null, '🎨 프롬프트로 바로 포스터 만들기'),
             h('p', { class: 'small', style: 'margin:4px 0' }, `한 문장당 ${mx}번까지 만들 수 있어요. 만든 그림은 자동으로 패들렛 방에 올라가요. (남은 횟수: ${left}번)`),
+            h('label', { class: 'small', style: 'display:block;margin-top:6px' }, '프롬프트 (그림이 마음에 안 들면 고친 뒤 다시 만들어 보세요)', pta),
             h('div', { class: 'actions' },
               needPost ? h('button', { class: 'btn primary', type: 'button', disabled: busy || null, onclick: postIt }, IM.busy === 'post' ? '패들렛에 올리는 중…' : '패들렛에 다시 올리기') : null,
               h('button', { class: 'btn' + (needPost ? '' : ' primary'), type: 'button', disabled: busy || left < 1 || null, onclick: make }, IM.busy === 'make' ? '만드는 중… (10~30초)' : left < 1 ? '횟수를 모두 썼어요' : IM.url ? '그림 다시 만들기' : '이미지 만들어 올리기')),
