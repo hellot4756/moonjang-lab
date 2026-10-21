@@ -727,7 +727,9 @@ function normalize(raw, sentence) {
   const checks = {};
   for (const k of KEYS) {
     const c = raw.checks[k];
-    if (!c || typeof c.ok !== 'boolean') return null;
+    if (!c) return null;
+    if (c.ok === 'true' || c.ok === 'false') c.ok = c.ok === 'true';
+    if (typeof c.ok !== 'boolean') return null;
     let where = clip(c.where, 80);
     if (where && !sentence.includes(where)) where = '';
     checks[k] = {
@@ -810,10 +812,10 @@ class Grader {
             const cand = (data.candidates || [])[0];
             const text = cand && cand.content && cand.content.parts ? cand.content.parts.map((x) => x.text || '').join('') : '';
             if (!text) { lastErr = { status: 200, message: data.promptFeedback && data.promptFeedback.blockReason ? '차단됨: ' + data.promptFeedback.blockReason : '빈 응답' }; continue; }
-            return { ok: true, text };
+            return { ok: true, text, finish: cand.finishReason || '', who };
           }
           const block = (data.content || []).find((b) => b.type === 'text');
-          return { ok: true, text: block ? block.text : '' };
+          return { ok: true, text: block ? block.text : '', finish: data.stop_reason || '', who };
         }
         let msg = '';
         try { const j = JSON.parse(bodyText); msg = (j.error && j.error.message) || ''; } catch (e) { msg = bodyText.slice(0, 200); }
@@ -859,7 +861,7 @@ class Grader {
       const t0 = Date.now();
       for (let attempt = 0; attempt < 2; attempt++) {
         if (attempt > 0 && Date.now() - t0 > 30000) break;
-        const out = await this.callWithFallback(SYSTEM, buildUserMessage(r, sentence), 1500);
+        const out = await this.callWithFallback(SYSTEM, buildUserMessage(r, sentence), 3000);
         if (!out.ok) return out;
         const result = normalize(extractJson(out.text), sentence);
         if (result) {
@@ -867,7 +869,10 @@ class Grader {
           if (this.cache.size > 2000) this.cache.delete(this.cache.keys().next().value);
           return { ok: true, result };
         }
-        lastMsg = 'AI 응답을 해석하지 못했어요.';
+        const t = String(out.text || '');
+        const why = !t ? '빈 응답' : /max_tokens|MAX_TOKENS/.test(out.finish || '') ? '답변이 중간에 잘림' : extractJson(t) ? 'JSON 형식 불일치' : 'JSON 없음';
+        lastMsg = `AI 응답을 해석하지 못했어요. (${out.who || ''} ${out.finish || ''} ${why})`;
+        console.log('[AI 해석 실패]', out.who, out.finish, why, t.length, JSON.stringify(t.slice(0, 160)), '…', JSON.stringify(t.slice(-120)));
       }
       return { ok: false, code: 'parse', message: lastMsg };
     } finally {
