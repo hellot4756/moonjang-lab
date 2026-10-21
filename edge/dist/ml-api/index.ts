@@ -2249,11 +2249,11 @@ async function handleApi(req, res, pathname, query) {
       const out = await PADLET.createPost({ key: store.settings.padletApiKey, boardId: cfg.boardId, section: room.section, subject: gp ? gp.subject : `${st.no ? st.no + '번 ' : ''}${st.name}`, body: gp ? gp.body : rec.sentence, imageUrl: pi.url });
       store.patchRecord(rec.id, { imgDiag: { step: 'padlet-done', ms: Date.now() - t0, ok: !!out.ok, status: out.status || 0, detail: String(out.detail || '').slice(0, 200), at: Date.now() } });
       if (!out.ok) {
-        padletLastError = `${new Date().toLocaleTimeString('ko-KR')} ${st.cls} ${st.no}번(이미지): ${out.status || '연결 실패'} ${out.detail || ''}`.slice(0, 300);
-        console.log('[패들렛 오류]', padletLastError);
+        const em = `${new Date().toLocaleTimeString('ko-KR')} ${st.cls} ${st.no}번(이미지): ${out.status || '연결 실패'} ${out.detail || ''}`.slice(0, 300);
+        console.log('[패들렛 오류]', em);
+        if (typeof store.setPadletErr === 'function') store.setPadletErr(em); else padletLastError = em;
         throw new HttpError(502, out.message || '패들렛에 올리지 못했어요.');
       }
-      padletLastError = '';
       store.patchRecord(rec.id, { posterImg: Object.assign({}, pi, { posted: true, postedAt: Date.now() }), padletAt: Date.now() });
       try {   // 진단: 저장이 막히거나 실패하면 화면에 이유가 보이게 한다
         await Promise.race([store.flush(), new Promise((_, rej) => setTimeout(() => rej(new Error('저장이 8초 넘게 끝나지 않았어요')), 8000))]);
