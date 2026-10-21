@@ -407,13 +407,17 @@
     const postedAt = S.group ? (item.padletAt || 0) : ((S.last && S.last.id === item.id && S.last.padletAt) || (S.history.find((x) => x.id === item.id) || {}).padletAt || 0);
     const hasAll = !!(S.padlet && S.padlet.all);
     const steps = [];
+    const p2 = S.demo || !S.round || S.round.phase >= 2;   // 2차시가 열려야 포스터 단계가 나타난다
     if (S.padlet.post) steps.push({ id: 'post', title: S.group ? '모둠 패들렛 방에 광고문구 올리기' : '내 패들렛에 광고문구 올리기', done: !!postedAt || roomShared });
-    if (S.posterOn) {
+    if (p2 && S.posterOn) {
       steps.push({ id: 'make', title: '포스터 프롬프트 만들기', done: roomShared || (lead ? !!PS.out : !!outP) });
       steps.push({ id: 'copy', title: lead ? '프롬프트 복사하기' : '프롬프트 확인하기', done: roomShared || (lead ? !!M.copied : !!outP) });
     }
-    steps.push({ id: 'room', title: S.posterOn ? '패들렛 방에서 포스터 만들어 올리기' : '내 패들렛 방으로 가기', done: roomShared || (lead && !!PS.done) });
-    if (hasAll) steps.push({ id: 'others', title: '다른 친구들 포스터 보기', done: !!M.others });
+    if (p2) steps.push({ id: 'room', title: S.posterOn ? '패들렛 방에서 포스터 만들어 올리기' : '내 패들렛 방으로 가기', done: roomShared || (lead && !!PS.done) });
+    if (hasAll) steps.push({ id: 'others', title: p2 ? '다른 친구들 포스터 보기' : '다른 친구들이 올린 글 모두 보기', done: !!M.others });
+    if (!steps.length) {
+      return h('section', { class: 'card mission', id: 'mission' }, h('h2', null, '1차시 활동 완료'), h('div', { class: 'notice ok' }, '문장 만들기를 마쳤어요. 포스터 만들기는 2차시에 해요. 선생님이 2차시를 열면 여기에 나타나요.'));
+    }
     const firstTodo = steps.find((x) => !x.done);
     const openId = (M.view && steps.some((x) => x.id === M.view)) ? M.view : (firstTodo ? firstTodo.id : '');
     const doneN = steps.filter((x) => x.done).length;
@@ -500,7 +504,7 @@
           } }, S.group ? '포스터를 올렸어요 ✓ (모둠원 화면도 함께 완료돼요)' : '포스터를 올렸어요 ✓')) : h('div', { class: 'notice' }, '모둠장이 포스터를 올리고 [포스터를 올렸어요]를 누르면, 이 단계까지 모두 완료로 바뀌어요.')];
       }
       if (id === 'others') {
-        return [h('p', { class: 'mhelp' }, '우리 반 친구들이 올린 포스터를 구경해 보세요.'),
+        return [h('p', { class: 'mhelp' }, p2 ? '우리 반 친구들이 올린 포스터를 구경해 보세요.' : '우리 반 친구들이 패들렛에 올린 광고문구를 모두 모아서 볼 수 있어요.'),
           h('div', { class: 'actions' }, h('a', { class: 'btn primary big', href: S.padlet.all, target: '_blank', rel: 'noopener', onclick: () => { M.others = true; save(); setTimeout(redraw, 0); } }, '다른 친구들 포스터 보러가기 →'))];
       }
       return [];
@@ -516,12 +520,12 @@
       list.append(h('li', { class: 'mstep' + (open ? ' open' : '') + (st.done ? ' done' : '') }, head, open ? h('div', { class: 'mbody' }, body(st.id)) : null));
     });
     const finished = !firstTodo;
-    card.append(...[h('h2', null, S.group ? `문장 ${item.slot + 1} 포스터 만들어 올리기` : '다음 미션: 포스터 만들어 올리기'),
+    card.append(...[h('h2', null, !p2 ? (S.group ? `문장 ${item.slot + 1} 패들렛에 올리기` : '다음 미션: 패들렛에 올리기') : S.group ? `문장 ${item.slot + 1} ${p2 ? '포스터 만들어 올리기' : '패들렛에 올리기'}` : (p2 ? '다음 미션: 포스터 만들어 올리기' : '다음 미션: 패들렛에 올리기')),
       S.group ? h('div', { class: 'actions', style: 'margin:-4px 0 6px' }, h('button', { class: 'btn sm', type: 'button', onclick: () => { M.pick = -1; save(); render(); const el = document.getElementById('group'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, '← 모둠 문장 목록으로')) : null,
       h('div', { class: 'mprog', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(steps.length), 'aria-valuenow': String(doneN) },
         h('div', { class: 'mbar', style: `width:${Math.round(doneN / steps.length * 100)}%` })),
       h('p', { class: 'muted small', style: 'margin:6px 0 10px' }, `${doneN} / ${steps.length} 단계 완료 · 위에서부터 차례대로 하나씩 하면 돼요`),
-      ...(finished ? [h('div', { class: 'notice ok' }, h('b', null, '모든 단계를 마쳤어요! '), S.group ? '수고했어요. 위의 [모둠 문장 목록으로]를 눌러 다른 문장 포스터도 만들어 보세요.' : '수고했어요. 위 단계를 눌러 다시 볼 수도 있어요.')] : []), list].filter(Boolean));
+      ...(finished && !p2 ? [h('div', { class: 'notice ok' }, h('b', null, '1차시 활동을 마쳤어요! '), '포스터 만들기는 2차시에 해요. 선생님이 2차시를 열면 여기에 나타나요.')] : finished ? [h('div', { class: 'notice ok' }, h('b', null, '모든 단계를 마쳤어요! '), S.group ? '수고했어요. 위의 [모둠 문장 목록으로]를 눌러 다른 문장 포스터도 만들어 보세요.' : '수고했어요. 위 단계를 눌러 다시 볼 수도 있어요.')] : []), list].filter(Boolean));
     return card;
   }
 
@@ -878,6 +882,7 @@
         S.challenge = null; S.last = null; S.mission = null; S.draft = ''; S.notice = ''; save();
         await enter(); return;
       }
+      if (me.round && S.round && me.round.id === S.round.id && me.round.phase !== S.round.phase) { S.round = me.round; if (S.mission) S.mission.others = false; if (!(document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName))) render(); }   // 2차시가 열림
       const prevCount = S.history.filter((x) => x.tfeedback).length;
       S.history = me.history; S.stats = me.stats; S.padletTemplate = me.padletTemplate || ''; S.padlet = me.padlet || { post: false, link: '' };
       // 선생님이 '주제 바꾸기'를 켜거나 끄면 이미 받은 조건 화면에도 바로 반영한다(켠 경우에는 주제 목록도 함께 받는다)

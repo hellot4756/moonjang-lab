@@ -503,6 +503,7 @@ class Store {
         id: String(x.id).slice(0, 12), no: Number(x.no) || 0, name: String(x.name || '').slice(0, 40),
         openedAt: Number(x.openedAt) || 0, closedAt: Number(x.closedAt) || 0,
         level: x.level || '', groupMode: !!x.groupMode, groupCount: Number(x.groupCount) || 0,
+        split: !!x.split, phase: x.phase === 2 ? 2 : 1,
         groupPlan: x.groupPlan && typeof x.groupPlan === 'object' ? x.groupPlan : {}, note: String(x.note || '').slice(0, 200),
       }));
     }
@@ -1518,7 +1519,12 @@ function roundsList() {
 }
 function activeRound() { return roundsList().find((x) => !x.closedAt) || null; }
 function recRound(r) { return r.rd || roundsList()[0].id; }
-function roundPub(x) { return x ? { id: x.id, no: x.no, name: x.name, openedAt: x.openedAt, closedAt: x.closedAt, groupMode: !!x.groupMode } : null; }
+function phaseOf(x) { return x && x.split ? (x.phase === 2 ? 2 : 1) : 2; }
+function roundPub(x) { return x ? { id: x.id, no: x.no, name: x.name, openedAt: x.openedAt, closedAt: x.closedAt, groupMode: !!x.groupMode, split: !!x.split, phase: phaseOf(x) } : null; }
+function requirePhase2(st) {
+  const ar = activeRound();
+  if (ar && phaseOf(ar) < 2) throw new HttpError(403, '포스터 만들기는 2차시에 열려요. 선생님이 2차시를 열면 이어서 할 수 있어요.');
+}
 function viewRound(q) {
   if (q === 'all') return '';
   if (q && roundsList().some((x) => x.id === q)) return q;
@@ -1760,7 +1766,7 @@ function teacherInfo() {
       claude: { configured: !!cKey, keyHint: maskKey(cKey), model: store.settings.model || process.env.ANTHROPIC_MODEL || DEFAULT_MODEL },
       gemini: { configured: !!gKey, keyHint: maskKey(gKey), model: store.settings.geminiModel || process.env.GEMINI_MODEL || DEFAULT_GEMINI },
     },
-    rounds: roundsList().map((x) => Object.assign(roundPub(x), { level: x.level || '', groupCount: x.groupCount || 0, groupPlan: x.groupPlan || {}, note: x.note || '', tries: store.records.filter((r) => recRound(r) === x.id).length })),
+    rounds: roundsList().map((x) => Object.assign(roundPub(x), { level: x.level || '', groupCount: x.groupCount || 0, groupPlan: x.groupPlan || {}, note: x.note || '', split: !!x.split, tries: store.records.filter((r) => recRound(r) === x.id).length })),
     activeRound: roundPub(activeRound()),
     settings: {
       level: store.settings.level,
@@ -1982,6 +1988,7 @@ async function handleApi(req, res, pathname, query) {
     const st = studentAuth(req);
     if (st.demo || !groupOn()) throw new HttpError(400, '지금은 모둠 활동이 아니에요.');
     requireLeader(st);
+    requirePhase2(st);
     const b = await readBody(req, 256);
     const rec = store.getRecord(String(b.id || ''));
     if (!rec || !rec.gk || rec.gk !== groupKey(st)) throw new HttpError(404, '문장을 찾을 수 없어요.');
@@ -2074,6 +2081,7 @@ async function handleApi(req, res, pathname, query) {
     if (st.demo) return send(res, 200, { id: 'demo' });
     if (store.settings.poster === false) throw new HttpError(403, '지금은 포스터 프롬프트 만들기가 닫혀 있어요.');
     if (!activeRound()) throw new HttpError(403, '지금 열려 있는 회차가 없어요. 지난 회차의 내용은 고칠 수 없어요.');
+    requirePhase2(st);
     if (rateLimited('poster:' + st.sid, 20, 60 * 1000)) throw new HttpError(429, '너무 빨리 만들고 있어요. 잠시 뒤에 다시 해 주세요.');
     const b = await readBody(req, 32 * 1024);
     const prompt = String(b.prompt || '').trim().slice(0, 4000);
@@ -2123,7 +2131,7 @@ async function handleApi(req, res, pathname, query) {
       const list = roundsList().slice();
       const no = list.reduce((m, x) => Math.max(m, x.no || 0), 0) + 1;
       const s = store.settings;
-      const round = { id: 'r' + no, no, name: clip(b.name, 40) || `${no}회차`, openedAt: Date.now(), closedAt: 0, level: s.level, groupMode: s.groupMode === true, groupCount: s.groupCount || 8, groupPlan: s.groupPlan || {}, note: clip(b.note, 200) };
+      const round = { id: 'r' + no, no, name: clip(b.name, 40) || `${no}회차`, openedAt: Date.now(), closedAt: 0, level: s.level, groupMode: s.groupMode === true, groupCount: s.groupCount || 8, groupPlan: s.groupPlan || {}, split: b.split === true, phase: 1, note: clip(b.note, 200) };
       list.push(round);
       store.updateSettings({ rounds: list, open: true, groupSeed: (Number(s.groupSeed) || 1) + 1 });   // 새 회차는 모둠도 새 조건을 받는다
       grader.cache.clear();
@@ -2134,6 +2142,14 @@ async function handleApi(req, res, pathname, query) {
       if (!ar) throw new HttpError(400, '열려 있는 회차가 없어요.');
       const list = roundsList().map((x) => (x.id === ar.id ? Object.assign({}, x, { closedAt: Date.now() }) : x));
       store.updateSettings({ rounds: list });
+      return send(res, 200, teacherInfo());
+    }
+    if (method === 'POST' && pathname === '/api/teacher/round/phase') {   // 2차시 열기(1차시로 되돌리기도 가능)
+      const b = await readBody(req, 256);
+      const ar = activeRound();
+      if (!ar) throw new HttpError(400, '열려 있는 회차가 없어요.');
+      if (!ar.split) throw new HttpError(400, '이 회차는 차시를 나누지 않고 열었어요.');
+      store.updateSettings({ rounds: roundsList().map((x) => (x.id === ar.id ? Object.assign({}, x, { phase: b.phase === 1 ? 1 : 2 }) : x)) });
       return send(res, 200, teacherInfo());
     }
     if (method === 'POST' && pathname === '/api/teacher/round/rename') {

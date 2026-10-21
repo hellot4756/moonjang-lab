@@ -332,14 +332,22 @@
       try { T.info = await api('/api/teacher/round/' + path, body || {}); renderShell(); } catch (e) { rmsg.hidden = false; rmsg.className = 'notice bad'; rmsg.textContent = e.message; }
     };
     if (ar) {
+      const cur = (info.rounds || []).find((x) => x.id === ar.id) || ar;
+      if (cur.split) rcard.append(h('div', { class: 'toolbar', style: 'margin-bottom:8px' },
+        h('span', { class: 'pill ' + (ar.phase >= 2 ? 'ok' : 'blue') }, ar.phase >= 2 ? '지금: 2차시 (포스터 단계 열림)' : '지금: 1차시 (문장 만들기~패들렛 올리기)'),
+        ar.phase >= 2
+          ? h('button', { class: 'btn sm', type: 'button', onclick: () => { if (confirm('1차시로 되돌릴까요? 학생 화면에서 포스터 단계가 다시 숨겨져요.')) roundCall('phase', { phase: 1 }); } }, '1차시로 되돌리기')
+          : h('button', { class: 'btn primary', type: 'button', onclick: () => { if (confirm('2차시를 열까요? 학생 화면에 포스터 프롬프트 만들기 이하 단계가 나타나요.')) roundCall('phase', { phase: 2 }); } }, '2차시 열기')));
       rcard.append(h('div', { class: 'toolbar' }, h('span', { class: 'pill ok' }, `${ar.name} 진행 중`),
         h('button', { class: 'btn', type: 'button', onclick: () => { if (confirm(`'${ar.name}'을(를) 닫을까요?\n닫으면 학생들은 이 회차의 문장·포스터·패들렛 올리기를 더 이상 고칠 수 없고, [내 기록 보기]에서 읽기만 할 수 있어요.`)) roundCall('close'); } }, '이 회차 닫기')),
         h('p', { class: 'muted small', style: 'margin-top:8px' }, '회차를 닫은 뒤 [조건 설정]·[모둠 활동]에서 다음 회차의 조건을 바꾸고 새 회차를 열면, 학생들이 새 조건을 받아요.'));
     } else {
       const nm = h('input', { type: 'text', maxlength: '40', placeholder: `회차 이름 (비우면 ${((info.rounds || []).reduce((m, x) => Math.max(m, x.no), 0)) + 1}회차)`, 'aria-label': '새 회차 이름' });
       const cnt = info.settings.groupMode ? '모둠 활동' : '개인 활동';
+      const sp = h('input', { type: 'checkbox', id: 'splitph' });
       rcard.append(h('div', { class: 'notice warn' }, '지금 열려 있는 회차가 없어요. 학생들은 새 조건을 받을 수 없고 지난 기록만 볼 수 있어요.'),
-        h('div', { class: 'toolbar', style: 'margin-top:8px' }, nm, h('button', { class: 'btn primary', type: 'button', onclick: () => roundCall('open', { name: nm.value }) }, '새 회차 열기')),
+        h('div', { class: 'toolbar', style: 'margin-top:8px' }, nm, h('button', { class: 'btn primary', type: 'button', onclick: () => roundCall('open', { name: nm.value, split: sp.checked }) }, '새 회차 열기')),
+        h('label', { for: 'splitph', class: 'small', style: 'display:flex;gap:6px;align-items:center;margin-top:8px' }, sp, '2차시로 나누어 진행 (1차시: 문장 만들기~패들렛 올리기 / 교사가 2차시를 열면 포스터 단계 열림)'),
         h('p', { class: 'muted small', style: 'margin-top:8px' }, `열면 지금의 설정(${cnt}, 조건 목록, 모둠 문장 수)이 이 회차의 조건이 돼요. 먼저 [조건 설정]·[모둠 활동]에서 조건을 정해 두세요.`));
     }
     const past = (info.rounds || []).filter((x) => x.closedAt);
