@@ -31,26 +31,32 @@
   function save() {
     try { if (S.demo && S.group && S.group.demoId) sessionStorage.setItem(DGKEY, JSON.stringify(S.group)); } catch (e) { /* 무시 */ }
     try {
-      sessionStorage.setItem(KEY, JSON.stringify({
+      const payload = {
         token: S.token, student: S.student, challenge: S.challenge, attempts: S.attempts,
         last: S.last, demo: S.demo, draft: S.draft, topicText: S.topicText, flagged: S.flagged, pstate: S.pstate, showPoster: S.showPoster, mission: S.mission,
-      }));
+      };
+      sessionStorage.setItem(KEY, JSON.stringify(payload));
+      if (S.token && !S.demo) { try { localStorage.setItem(KEY + '.bk', JSON.stringify({ t: Date.now(), s: payload })); } catch (e2) { /* 백업은 없어도 된다 */ } }
     } catch (e) { /* 저장소를 쓸 수 없어도 동작한다 */ }
   }
   function load() {
     try {
-      const o = JSON.parse(sessionStorage.getItem(KEY) || 'null');
+      let o = JSON.parse(sessionStorage.getItem(KEY) || 'null');
+      if (!(o && o.token)) {   // 브라우저가 탭을 닫았다 열면서 임시 저장이 사라진 경우: 최근 4시간 안의 백업으로 이어서 한다
+        const bk = JSON.parse(localStorage.getItem(KEY + '.bk') || 'null');
+        if (bk && bk.s && bk.s.token && !bk.s.demo && Date.now() - bk.t < 4 * 3600 * 1000) o = bk.s;
+      }
       if (o && o.token) Object.assign(S, o);
     } catch (e) { /* 무시 */ }
   }
   function logout(expired) {
-    try { sessionStorage.removeItem(KEY); } catch (e) { /* 무시 */ }
+    try { sessionStorage.removeItem(KEY); localStorage.removeItem(KEY + '.bk'); } catch (e) { /* 무시 */ }
     Object.assign(S, { group: null, topicText: '', token: '', student: null, challenge: null, attempts: 0, last: null, draft: '', flagged: false, showHist: false, history: [], showPoster: false, pstate: { form: window.Poster.defaults(), out: null, lang: 'ko' } });
     S.notice = expired ? '다시 입장해 주세요.' : '';
     render();
   }
 
-  async function api(path, body) {
+  async function api(path, body, retried) {
     const opt = { method: body === undefined ? 'GET' : 'POST', headers: { 'content-type': 'application/json' } };
     if (S.token) opt.headers.Authorization = 'Bearer ' + S.token;
     if (body !== undefined) opt.body = JSON.stringify(body);
@@ -60,6 +66,10 @@
     let data = {};
     try { data = await res.json(); } catch (e) { /* 본문 없음 */ }
     if (!res.ok) {
+      if (res.status === 401 && S.token && !retried && !S.demo) {   // 서버가 잠깐 헷갈린 경우를 위해 한 번 더 확인한 뒤에만 로그아웃한다
+        clearTimeout(tm); await new Promise((r) => setTimeout(r, 1500));
+        return api(path, body, true);
+      }
       if (res.status === 401 && S.token) logout(true);
       const err = new Error(data.error || '문제가 생겼어요. 잠시 후 다시 시도해 주세요.');
       err.status = res.status;
