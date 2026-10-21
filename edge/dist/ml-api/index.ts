@@ -1366,8 +1366,10 @@ class DbStore extends Store {
     }
     const changed = [...cur].filter(([k, v]) => this.kvVer[k] !== v).map(([k]) => k);
     if (changed.length) {
-      const rows = await rest('GET', 'ml_kv?select=key,val,ver&key=in.(' + changed.map((k) => '"' + k + '"').join(',') + ')');
-      for (const r of rows) { this.applyKv(r.key, r.val); this.kvVer[r.key] = r.ver; }
+      for (let i = 0; i < changed.length; i += 60) {   // 주소가 너무 길어지지 않게 나누어 가져온다
+        const rows = await rest('GET', 'ml_kv?select=key,val,ver&key=in.(' + changed.slice(i, i + 60).map((k) => '"' + k + '"').join(',') + ')');
+        for (const r of rows) { this.applyKv(r.key, r.val); this.kvVer[r.key] = r.ver; }
+      }
     }
     for (const k of Object.keys(this.kvVer)) if (!cur.has(k)) { this.applyKv(k, null); delete this.kvVer[k]; }
   }

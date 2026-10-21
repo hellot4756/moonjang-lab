@@ -66,11 +66,17 @@
     let data = {};
     try { data = await res.json(); } catch (e) { /* 본문 없음 */ }
     if (!res.ok) {
-      if (res.status === 401 && S.token && !retried && !S.demo) {   // 서버가 잠깐 헷갈린 경우를 위해 한 번 더 확인한 뒤에만 로그아웃한다
-        clearTimeout(tm); await new Promise((r) => setTimeout(r, 1500));
+      if (res.status === 401 && S.token && !retried && !S.demo && path !== '/api/login') {
+        // 로그인 정보가 거절돼도 바로 나가지 않는다: 잠시 뒤 한 번 더 확인하고, 그래도 안 되면 입장할 때 쓴 학번·이름으로 조용히 다시 입장해서 하던 화면을 이어 간다
+        clearTimeout(tm); await new Promise((r) => setTimeout(r, 1200));
+        try {
+          const st = S.student;
+          const r2 = await fetch((window.ML_API || '') + '/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sid: st && st.sid, name: st && st.name }) });
+          if (r2.ok) { const j = await r2.json(); S.token = j.token; save(); }
+        } catch (e) { /* 아래에서 다시 시도 */ }
         return api(path, body, true);
       }
-      if (res.status === 401 && S.token) logout(true);
+      if (res.status === 401 && S.token) { logout(true); S.notice = '다시 입장해 주세요.' + (data.error ? ` (${data.error})` : ''); render(); }
       const err = new Error(data.error || '문제가 생겼어요. 잠시 후 다시 시도해 주세요.');
       err.status = res.status;
       throw err;
