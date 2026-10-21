@@ -2210,24 +2210,51 @@ async function handleApi(req, res, pathname, query) {
     imgBusy.add(rec.id);
     store.patchRecord(rec.id, { imgN: (rec.imgN || 0) + 1 });   // 먼저 한 번 쓴 것으로 치고, 실패하면 돌려준다
     const refund = () => store.patchRecord(rec.id, { imgN: Math.max(0, (store.getRecord(rec.id).imgN || 1) - 1) });
+    let saved = false;
     try {
       const g = await IMAGES.generate({ key: gcfg.apiKey, base: gcfg.baseUrl ? gcfg.baseUrl.replace(/\/+$/, '') + '/v1beta' : '', model: store.settings.imageModel || process.env.GEMINI_IMAGE_MODEL || '', prompt });
-      if (!g.ok) { refund(); throw new HttpError(502, g.message); }
+      if (!g.ok) throw new HttpError(502, g.message);
       const url = await IMAGES.save({ buf: g.buf, mime: g.mime, name: `${rec.id}-${Date.now().toString(36)}`, env: process.env });
-      if (!url) { refund(); throw new HttpError(502, '이미지를 저장하지 못했어요. 선생님께 알려 주세요.'); }
+      if (!url) throw new HttpError(502, '이미지를 저장하지 못했어요. 선생님께 알려 주세요.');
       const mine = store.getRecord(rec.id);
-      store.patchRecord(rec.id, { posterImg: { url, at: Date.now(), by: st.name, prompt }, posterImgs: [...(mine.posterImgs || []), url].slice(-10) });
-      let posted = false, link = '', pmsg = '';
-      const { cfg, room } = padletRoom(st);
-      if (store.settings.padletApiKey && cfg && cfg.boardId && room && room.section) {
-        const gno = rec.gk ? store.groupOf(st.sid) : 0;
-        const gp = gno ? PosterLib.groupPadlet({ no: gno, names: groupMembers(st.cls, gno).map((x) => x.name), comp: rec.compLabel, struct: rec.structLabel, topic: rec.topicLabel, sentence: rec.sentence }) : null;
-        const out = await PADLET.createPost({ key: store.settings.padletApiKey, boardId: cfg.boardId, section: room.section, subject: gp ? gp.subject : `${st.no ? st.no + '번 ' : ''}${st.name}`, body: gp ? gp.body : rec.sentence, imageUrl: url });
-        if (out.ok) { posted = true; link = room.link || ''; store.patchRecord(rec.id, { padletAt: Date.now() }); padletLastError = ''; }
-        else { pmsg = out.message || '패들렛에 올리지 못했어요.'; padletLastError = `${new Date().toLocaleTimeString('ko-KR')} ${st.cls} ${st.no}번(이미지): ${out.status || '연결 실패'} ${out.detail || ''}`.slice(0, 300); console.log('[패들렛 오류]', padletLastError); }
-      } else pmsg = '내 패들렛 방이 아직 연결되지 않아 이미지는 여기에만 보여 줘요.';
-      return send(res, 200, { ok: true, url, posted, link, padletMessage: pmsg, left: Math.max(0, max - (store.getRecord(rec.id).imgN || 0)) });
+      store.patchRecord(rec.id, { posterImg: { url, at: Date.now(), by: st.name, prompt, posted: false }, posterImgs: [...(mine.posterImgs || []), url].slice(-10) });
+      saved = true;
+      return send(res, 200, { ok: true, url, left: Math.max(0, max - (store.getRecord(rec.id).imgN || 0)) });
+    } catch (e) {
+      if (!saved) refund();   // 그림이 저장되기 전에 실패했으면 횟수를 돌려준다
+      if (e instanceof HttpError) throw e;
+      console.error('[이미지 오류]', e && e.message);
+      throw new HttpError(502, '이미지를 만들지 못했어요. 잠시 뒤에 다시 해 주세요. (횟수는 줄지 않았어요)');
     } finally { imgBusy.delete(rec.id); }
+  }
+  if (method === 'POST' && pathname === '/api/poster/image/post') {
+    const st = studentAuth(req);
+    if (st.demo) return send(res, 200, { ok: true, posted: true, demo: true });
+    const b = await readBody(req, 2048);
+    const rec = store.getRecord(String(b.id || ''));
+    if (!rec || (rec.sid !== st.sid && !(rec.gk && rec.gk === groupKey(st)))) throw new HttpError(404, '문장을 찾지 못했어요.');
+    if (!activeRound() || recRound(rec) !== activeRound().id) throw new HttpError(403, '끝난 회차의 내용은 고칠 수 없어요.');
+    if (rec.gk) requireLeader(st);
+    const pi = rec.posterImg;
+    if (!pi || !pi.url) throw new HttpError(400, '올릴 그림이 아직 없어요.');
+    const { cfg, room } = padletRoom(st);
+    if (pi.posted) return send(res, 200, { ok: true, posted: true, already: true, link: room && room.link || '' });
+    if (!store.settings.padletApiKey || !cfg || !cfg.boardId || !room || !room.section) throw new HttpError(400, '내 패들렛 방이 아직 연결되지 않았어요. 선생님께 알려 주세요.');
+    if (imgBusy.has('p' + rec.id)) throw new HttpError(429, '올리는 중이에요. 잠시만 기다려 주세요.');
+    imgBusy.add('p' + rec.id);
+    try {
+      const gno = rec.gk ? store.groupOf(st.sid) : 0;
+      const gp = gno ? PosterLib.groupPadlet({ no: gno, names: groupMembers(st.cls, gno).map((x) => x.name), comp: rec.compLabel, struct: rec.structLabel, topic: rec.topicLabel, sentence: rec.sentence }) : null;
+      const out = await PADLET.createPost({ key: store.settings.padletApiKey, boardId: cfg.boardId, section: room.section, subject: gp ? gp.subject : `${st.no ? st.no + '번 ' : ''}${st.name}`, body: gp ? gp.body : rec.sentence, imageUrl: pi.url });
+      if (!out.ok) {
+        padletLastError = `${new Date().toLocaleTimeString('ko-KR')} ${st.cls} ${st.no}번(이미지): ${out.status || '연결 실패'} ${out.detail || ''}`.slice(0, 300);
+        console.log('[패들렛 오류]', padletLastError);
+        throw new HttpError(502, out.message || '패들렛에 올리지 못했어요.');
+      }
+      padletLastError = '';
+      store.patchRecord(rec.id, { posterImg: Object.assign({}, pi, { posted: true, postedAt: Date.now() }), padletAt: Date.now() });
+      return send(res, 200, { ok: true, posted: true, link: room.link || '' });
+    } finally { imgBusy.delete('p' + rec.id); }
   }
   if (method === 'POST' && pathname === '/api/submit') {
     const st = studentAuth(req);

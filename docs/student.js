@@ -428,12 +428,13 @@
     const hasAll = !!(S.padlet && S.padlet.all);
     const steps = [];
     const p2 = S.demo || !S.round || S.round.phase >= 2;   // 2차시가 열려야 포스터 단계가 나타난다
-    if (S.padlet.post) steps.push({ id: 'post', title: S.group ? '모둠 패들렛 방에 광고문구 올리기' : '내 패들렛에 광고문구 올리기', done: !!postedAt || roomShared });
+    const imgMode = !!(S.imageGen && S.posterOn);   // 이미지 만들기가 켜져 있으면 글 올리기·복사 단계는 건너뛴다
+    if (S.padlet.post && !(imgMode && p2)) steps.push({ id: 'post', title: S.group ? '모둠 패들렛 방에 광고문구 올리기' : '내 패들렛에 광고문구 올리기', done: !!postedAt || roomShared });
     if (p2 && S.posterOn) {
       steps.push({ id: 'make', title: '포스터 프롬프트 만들기', done: roomShared || (lead ? !!PS.out : !!outP) });
-      steps.push({ id: 'copy', title: lead ? '프롬프트 복사하기' : '프롬프트 확인하기', done: roomShared || (lead ? !!M.copied : !!outP) });
+      if (!imgMode) steps.push({ id: 'copy', title: lead ? '프롬프트 복사하기' : '프롬프트 확인하기', done: roomShared || (lead ? !!M.copied : !!outP) });
     }
-    if (p2) steps.push({ id: 'room', title: S.posterOn ? '패들렛 방에서 포스터 만들어 올리기' : '내 패들렛 방으로 가기', done: roomShared || (lead && !!PS.done) });
+    if (p2) steps.push({ id: 'room', title: imgMode ? '포스터 만들어 올리기' : S.posterOn ? '패들렛 방에서 포스터 만들어 올리기' : '내 패들렛 방으로 가기', done: roomShared || (lead && (!!PS.done || (imgMode && !!(item.posterImg && item.posterImg.posted)))) });
     if (hasAll) steps.push({ id: 'others', title: p2 ? '다른 친구들 포스터 보기' : '다른 친구들이 올린 글 모두 보기', done: !!M.others });
     if (!steps.length) {
       return h('section', { class: 'card mission', id: 'mission' }, h('h2', null, '1차시 활동 완료'), h('div', { class: 'notice ok' }, '문장 만들기를 마쳤어요. 포스터 만들기는 2차시에 해요. 선생님이 2차시를 열면 여기에 나타나요.'));
@@ -508,29 +509,54 @@
           ['만들어진 그림 중 마음에 드는 포스터를 골라 ', '올려요.', ''],
         ];
         const imgBox = (() => {
-          if (!S.imageGen || !S.posterOn || !PS.out || !item.id) return null;
+          if (!imgMode || !item.id) return null;
           const key = String(item.id), mx = S.imageMax || 2;
-          const IM = (IMGS[key] = IMGS[key] || { n: item.imgN || 0, url: (item.posterImg && item.posterImg.url) || '', busy: false, msg: '', warn: '' });
+          const sv = item.posterImg || null;
+          const IM = (IMGS[key] = IMGS[key] || { n: 0, url: '', posted: false, busy: '', msg: '', warn: '' });
           IM.n = Math.max(IM.n, item.imgN || 0);
+          if (sv && sv.url && (!IM.url || sv.at > (IM.at || 0))) { IM.url = sv.url; IM.at = sv.at; }
+          if (sv && sv.posted) IM.posted = true;
           const left = Math.max(0, mx - IM.n);
-          if (!lead) return IM.url ? h('div', { class: 'notice' }, '모둠장이 만든 포스터예요.', h('div', null, h('img', { src: IM.url, alt: '만들어진 포스터', style: 'max-width:100%;max-height:360px;margin-top:6px;border-radius:8px' }))) : null;
-          const go = async (ev) => {
+          const pic = IM.url ? h('img', { src: IM.url, alt: '만들어진 포스터', style: 'max-width:100%;max-height:360px;margin-top:6px;border-radius:8px' }) : null;
+          if (!lead) return h('div', { class: 'notice' }, IM.url ? (IM.posted ? '모둠장이 만든 포스터가 패들렛에 올라갔어요.' : '모둠장이 포스터를 만드는 중이에요.') : '모둠장이 포스터를 만들면 여기에 나타나요.', pic);
+          const finish = async () => {
+            if (S.group && slot && !S.demo) { try { await api('/api/group/roomdone', { id: item.id }); slot.roomDone = Date.now(); } catch (e) { /* 모둠원 화면 완료 표시는 다음에 다시 */ } }
+            PS.done = true; M.view = 'room'; save();
+          };
+          const postIt = async () => {
+            IM.busy = 'post'; IM.warn = ''; redraw();
+            try { await api('/api/poster/image/post', { id: item.id }); IM.posted = true; IM.msg = '패들렛에 올렸어요!'; await finish(); }
+            catch (e) { IM.warn = (e.message || '') + ' [패들렛에 다시 올리기]를 눌러 주세요.'; }
+            IM.busy = ''; redraw();
+          };
+          const make = async () => {
             if (S.demo) { IM.msg = '체험 모드에서는 이미지를 만들지 않아요.'; redraw(); return; }
-            IM.busy = true; IM.msg = ''; IM.warn = ''; redraw();
+            IM.busy = 'make'; IM.msg = ''; IM.warn = ''; IM.posted = false; redraw();
             try {
               const o = await api('/api/poster/image', { id: item.id, prompt: PS.out.en || PS.out.ko });
-              IM.n = Math.max(IM.n + 1, mx - o.left); IM.url = o.url;
-              IM.msg = o.posted ? '패들렛에 올렸어요! 패들렛에서 확인해 보세요.' : ''; IM.warn = o.posted ? '' : (o.padletMessage || '패들렛에는 올리지 못했어요. 선생님께 알려 주세요.');
-              M.opened = true; save();
-            } catch (e) { IM.warn = e.message; }
-            IM.busy = false; redraw();
+              IM.n = Math.max(IM.n + 1, mx - o.left); IM.url = o.url; IM.at = Date.now();
+            } catch (e) {
+              IM.warn = e.message;
+              try { const me = await api('/api/me'); S.history = me.history; const r = (S.history || []).find((x) => x.id === item.id); if (r) { IM.n = Math.max(IM.n, r.imgN || 0); if (r.posterImg) { IM.url = r.posterImg.url; IM.at = r.posterImg.at; IM.posted = !!r.posterImg.posted; } } } catch (e2) { /* 그대로 둔다 */ }
+              IM.busy = ''; redraw(); return;
+            }
+            IM.busy = ''; redraw();
+            await postIt();
           };
+          const busy = !!IM.busy;
+          const needPost = IM.url && !IM.posted;
           return h('div', { class: 'notice' }, h('b', null, '🎨 프롬프트로 바로 포스터 만들기'),
             h('p', { class: 'small', style: 'margin:4px 0' }, `한 문장당 ${mx}번까지 만들 수 있어요. 만든 그림은 자동으로 패들렛 방에 올라가요. (남은 횟수: ${left}번)`),
-            h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'button', disabled: IM.busy || left < 1 || null, onclick: go }, IM.busy ? '만드는 중… (10~30초)' : left < 1 ? '횟수를 모두 썼어요' : IM.n ? '다시 만들어 올리기' : '이미지 만들어 올리기')),
-            IM.msg ? h('p', { class: 'small', role: 'status' }, IM.msg) : null, IM.warn ? h('p', { class: 'small', style: 'color:#b3261e', role: 'alert' }, IM.warn) : null,
-            IM.url ? h('img', { src: IM.url, alt: '만들어진 포스터', style: 'max-width:100%;max-height:360px;margin-top:6px;border-radius:8px' }) : null);
+            h('div', { class: 'actions' },
+              needPost ? h('button', { class: 'btn primary', type: 'button', disabled: busy || null, onclick: postIt }, IM.busy === 'post' ? '패들렛에 올리는 중…' : '패들렛에 다시 올리기') : null,
+              h('button', { class: 'btn' + (needPost ? '' : ' primary'), type: 'button', disabled: busy || left < 1 || null, onclick: make }, IM.busy === 'make' ? '만드는 중… (10~30초)' : left < 1 ? '횟수를 모두 썼어요' : IM.url ? '그림 다시 만들기' : '이미지 만들어 올리기')),
+            IM.msg && !IM.warn ? h('p', { class: 'small', role: 'status' }, IM.msg) : null, IM.warn ? h('p', { class: 'small', style: 'color:#b3261e', role: 'alert' }, IM.warn) : null, pic);
         })();
+        const posted = !!(imgMode && ((IMGS[String(item.id)] || {}).posted || (item.posterImg && item.posterImg.posted)));
+        if (imgMode) {
+          const go2 = S.padlet.link ? h('a', { class: 'btn big' + (posted ? ' primary' : ''), href: posted ? S.padlet.link : null, target: '_blank', rel: 'noopener', 'aria-disabled': posted ? null : 'true', style: posted ? '' : 'opacity:.45;pointer-events:none', onclick: () => { M.opened = true; save(); } }, posted ? (S.padlet.board ? '패들렛 보드에서 확인하기 →' : '내 패들렛 방에서 확인하기 →') : '패들렛 가기 (그림이 올라가면 열려요)') : null;
+          return [imgBox, h('div', { class: 'actions' }, go2)];
+        }
         const needCopy = lead && S.posterOn && !M.copied && PS.out;
         const reCopy = needCopy ? h('div', { class: 'notice warn' }, '프롬프트를 아직 복사하지 않았어요. ', h('button', { class: 'btn sm', type: 'button', onclick: async () => { const ok = await copyText(PS.out[PS.lang === 'en' ? 'en' : 'ko'], document.createElement('textarea')); if (ok) { M.copied = true; save(); redraw(); } } }, '지금 복사하기')) : null;
         const adTa = !S.padlet.post && lead ? (() => {
@@ -693,7 +719,7 @@
     await refreshGroup();
     if (!S.group) { render(); return; }
     if (S.group.no && !S.group.isLeader && S.challenge) { S.challenge = null; S.last = null; S.draft = ''; save(); gSig = ''; render(); }
-    const sig = JSON.stringify([S.group.no, S.group.isLeader, S.group.members, S.group.slots.map((x) => [x.status, x.sentence, x.padletAt, x.tries, x.poster && x.poster.at, x.roomDone, (x.notes || []).length])]);
+    const sig = JSON.stringify([S.group.no, S.group.isLeader, S.group.members, S.group.slots.map((x) => [x.status, x.sentence, x.padletAt, x.tries, x.poster && x.poster.at, x.posterImg && x.posterImg.at, x.posterImg && x.posterImg.posted, x.roomDone, (x.notes || []).length])]);
     if (sig === gSig) return;
     { const ae = document.activeElement, g0 = document.getElementById('group'); if (ae && ae.tagName === 'TEXTAREA' && g0 && g0.contains(ae)) return; }   // 연습장에 적는 중이면 다음에 갱신
     gSig = sig;
