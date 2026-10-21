@@ -1182,14 +1182,27 @@
     // 수업 참관용 계정: 공용 비밀번호 하나로 여러 명이 동시에 들어올 수 있다
     const opw = h('input', { type: 'text', id: 'opw', autocomplete: 'off', placeholder: '비워 두면 참관 계정이 꺼져요', value: info.settings.observerPassword || '' });
     const oUrl = new URL('observer.html', window.ML_API ? new URL('./', location.href).href : location.origin + '/').href;
+    const obsSel = new Set(info.settings.observerClasses || []);
+    const clsBox = h('div', { class: 'chips', role: 'group', 'aria-label': '참관자가 볼 수 있는 반' });
+    api('/api/teacher/overview').then((o) => {
+      const all = o.classes.map((c) => c.cls);
+      for (const c of obsSel) if (!all.includes(c)) all.push(c);   // 명단에서 사라진 반도 선택 상태는 보여 준다
+      clsBox.replaceChildren(...all.map((c) => {
+        const id = 'ocls-' + c.replace(/\s+/g, '');
+        const cb = h('input', { type: 'checkbox', id }); cb.checked = obsSel.has(c);
+        cb.addEventListener('change', () => { if (cb.checked) obsSel.add(c); else obsSel.delete(c); });
+        return h('label', { class: 'chip', for: id, style: 'display:inline-flex;gap:6px;align-items:center' }, cb, c);
+      }));
+    }).catch(() => {});
     const obsSave = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
-      try { T.info = await api('/api/teacher/settings', { observerPassword: opw.value.trim() }, 'PUT'); toast(opw.value.trim() ? '참관 계정을 열었어요.' : '참관 계정을 껐어요.'); } catch (e) { toast(e.message, true); }
+      try { T.info = await api('/api/teacher/settings', { observerPassword: opw.value.trim(), observerClasses: [...obsSel] }, 'PUT'); toast(opw.value.trim() ? '참관 계정을 열었어요.' : '참관 계정을 껐어요.'); } catch (e) { toast(e.message, true); }
     } }, '저장');
     const obsCard = h('section', { class: 'card' }, h('h2', null, '수업 참관용 계정'),
       h('div', { class: 'wrap', style: 'max-width:520px' },
         h('p', { class: 'muted small' }, '참관 선생님께 아래 주소와 비밀번호를 알려 주세요. 같은 비밀번호로 여러 명이 동시에 들어올 수 있어요. 참관자는 ① 학생 이름을 가린 현황판을 읽기만 할 수 있고 ② 학생 화면을 체험할 수 있어요. 체험한 문장은 어디에도 저장되지 않고 수업에 영향을 주지 않아요.'),
         h('div', { class: 'url' }, oUrl),
         h('label', { class: 'field', for: 'opw' }, '참관 비밀번호', opw),
+        h('div', { class: 'field' }, '참관자가 볼 수 있는 반', clsBox, h('span', { class: 'muted small' }, '아무것도 고르지 않으면 모든 반이 보여요. 고른 반만 현황판에 나타나요.')),
         h('div', { class: 'toolbar' }, obsSave)));
 
     // 모둠 활동: 모둠이 같은 조건을 받아 함께 문장·포스터를 만든다
