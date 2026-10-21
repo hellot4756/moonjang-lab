@@ -55,10 +55,13 @@
 
   const STATES = [['typing', '입력 중', '✎'], ['pending', '확인 대기', '⏳'], ['correct', '정답', '✓'], ['incorrect', '오답·반려', '✕'], ['waiting', '접속함', '○'], ['offline', '미접속', '–']];
 
-  function tryIt() {
-    // 학생 화면 체험: 참관 토큰으로 학생 화면을 연다(서버가 기록·현황판에 남기지 않는다)
+  async function tryIt(mode) {
+    // 학생 화면 체험: 참관 토큰으로 학생 화면을 연다(서버가 기록·현황판에 남기지 않는다). mode: 'solo' 개인 학습 | 'group' 모둠 학습
+    let dtoken = token;
+    try { dtoken = (await api('/api/observer/demo-token', { mode })).token; } catch (e) { alert(e.message); return; }
     try {
-      sessionStorage.setItem(SKEY, JSON.stringify({ token, student: { sid: '참관체험', name: '참관 체험', cls: '참관', no: 0 }, demo: true }));
+      sessionStorage.removeItem('moonjang.demog.v1');
+      sessionStorage.setItem(SKEY, JSON.stringify({ token: dtoken, student: { sid: '참관체험', name: '참관 체험', cls: '참관', no: 0 }, demo: true }));
     } catch (e) { alert('이 브라우저에서는 체험 화면을 열 수 없어요.'); return; }
     location.href = './';
   }
@@ -66,7 +69,7 @@
   function renderMain() {
     const top = h('div', { class: 'top' },
       h('div', { class: 'brand' }, h('span', { class: 'stampbox sm' }, '제2막'), '문장 연습실', h('small', null, '문법광인의 서재 · 수업 참관')),
-      h('div', null, h('button', { class: 'btn sm primary', type: 'button', onclick: tryIt }, '학생 화면 체험하기'), ' ', h('button', { class: 'btn sm', type: 'button', onclick: out }, '나가기')));
+      h('div', null, h('button', { class: 'btn sm primary', type: 'button', onclick: () => tryIt('solo') }, '개인 학습 체험하기'), ' ', h('button', { class: 'btn sm primary', type: 'button', onclick: () => tryIt('group') }, '모둠 학습 체험하기'), ' ', h('button', { class: 'btn sm', type: 'button', onclick: out }, '나가기')));
     const note = h('div', { class: 'notice ok' }, '학생 이름은 가려서 보여요. 체험한 문장과 기록은 저장되지 않아 실제 수업에 영향이 없어요.');
     const toolbar = h('div', { class: 'toolbar' });
     const legend = h('div', { class: 'blegend' });

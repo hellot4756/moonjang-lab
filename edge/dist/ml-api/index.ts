@@ -1507,11 +1507,12 @@ function bearer(req) {
 }
 const demoTries = new Map(); // 참관 체험 제출 횟수(저장하지 않음)
 const DEMO = { sid: '참관체험', name: '참관 체험', cls: '참관', no: 0, level: '', demo: true };
+const DEMO_G = Object.assign({}, DEMO, { dg: true });   // 모둠 학습 체험
 function studentAuth(req) {
   const p = verify(bearer(req));
   if (p && p.r === 'o') {
     if (!store.settings.observerPassword) throw new HttpError(401, '참관 계정이 닫혔어요.');
-    return DEMO;
+    return p.dm === 'group' ? DEMO_G : DEMO;
   }   // 참관자의 학생 화면 체험: 기록·현황판에 남기지 않는다
   if (!p || p.r !== 's') throw new HttpError(401, '다시 입장해 주세요.');
   const st = store.studentBySid(p.sid);
@@ -1596,8 +1597,8 @@ function mulberry(seed) {
   return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 function hashStr(str) { let h = 2166136261; for (const ch of String(str)) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
-function groupSlots(cls, no) {
-  const plan = store.settings.groupPlan || {};
+function groupSlots(cls, no, planIn) {
+  const plan = planIn || store.settings.groupPlan || {};
   const structs = C.snapshot().structs;
   const picks = [];
   for (const sx of structs) for (let k = 0; k < (plan[sx.id] || 0); k++) picks.push(sx.id);
@@ -1664,8 +1665,22 @@ function groupData(cls, no, rid) {
   out.pending = out.slots.filter((x) => x.status === 'pending').length;
   return out;
 }
+function demoSlots() {
+  let plan = store.settings.groupPlan || {};
+  if (!Object.keys(plan).length) { plan = {}; for (const x of C.snapshot().structs.filter((y) => !y.off).slice(0, 2)) plan[x.id] = 1; }
+  return groupSlots('체험', 1, plan).map((sl) => Object.assign({}, sl, { n: 'demo.' + sl.i }));
+}
+function demoGroupView() {
+  const slots = demoSlots().map((sl) => {
+    const res = C.resolve(sl.ids), view = res ? C.publicView(res) : null;
+    return { i: sl.i, conds: view, tries: 0, status: 'todo', id: '', sentence: '', by: '', topic: view ? view.topic.label : '', comp: res ? res.comp.label : '', struct: res ? res.struct.label : '', padletAt: 0, poster: null, roomDone: 0, notes: [] };
+  });
+  return { demoId: 'g', count: 1, no: 1, members: [{ name: '나(체험)', me: true, leader: true }, { name: '모둠원 예시 1', me: false, leader: false }, { name: '모둠원 예시 2', me: false, leader: false }],
+    slots, total: slots.length, done: 0, leader: { name: '나(체험)', me: true }, isLeader: true };
+}
 function groupView(st) {
-  if (!groupOn() || st.demo) return null;
+  if (st.demo) return st.dg ? demoGroupView() : null;
+  if (!groupOn()) return null;
   const no = store.groupOf(st.sid);
   if (!activeRound()) return { count: store.settings.groupCount || 8, no, members: [], slots: [], total: 0, done: 0, leader: null, isLeader: false, noRound: true };
   const out = { count: store.settings.groupCount || 8, no, members: [], slots: [], total: 0, done: 0, leader: null, isLeader: false };
@@ -1925,6 +1940,12 @@ async function handleApi(req, res, pathname, query) {
       student: { sid: st.sid, name: st.name, cls: st.cls, no: st.no },
     });
   }
+  if (method === 'POST' && pathname === '/api/observer/demo-token') {
+    observerAuth(req);
+    if (!store.settings.observerPassword) throw new HttpError(401, '참관 계정이 닫혔어요.');
+    const b = await readBody(req, 256);
+    return send(res, 200, { token: sign({ r: 'o', dm: b.mode === 'group' ? 'group' : 'solo', exp: Date.now() + 8 * HOUR }) });
+  }
   if (method === 'POST' && pathname === '/api/observer/login') {
     if (rateLimited('ologin:' + ip, 20, 60 * 1000)) throw new HttpError(429, '잠시 후 다시 시도해 주세요.');
     const b = await readBody(req, 1024);
@@ -1987,7 +2008,12 @@ async function handleApi(req, res, pathname, query) {
     if (!st.demo && !ar) throw new HttpError(403, '지금 열려 있는 회차가 없어요. 선생님이 새 회차를 열면 조건을 받을 수 있어요. 지난 회차는 [내 기록 보기]에서 볼 수 있어요.');
     const own = st.level === 'easy' || st.level === 'basic' ? st.level : '';
     let ids, cid = '', gk = '';
-    if (groupOn() && !st.demo) {
+    if (st.dg) {   // 참관자의 모둠 학습 체험
+      const b0 = await readBody(req, 512);
+      const sl = demoSlots()[parseInt(b0.slot, 10)];
+      if (!sl) throw new HttpError(400, '체험 모둠 문제를 찾을 수 없어요.');
+      ids = sl.ids; cid = sl.n;
+    } else if (groupOn() && !st.demo) {
       const b0 = await readBody(req, 512);
       gk = groupKey(st);
       if (!gk) throw new HttpError(400, '먼저 모둠을 골라 주세요.');

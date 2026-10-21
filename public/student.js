@@ -27,7 +27,9 @@
     posterOn: false, showPoster: false, showPadlet: false, padPick: '', padletTemplate: '', padlet: { post: false, link: '' }, group: null, pstate: { form: window.Poster.defaults(), out: null, lang: 'ko' }, mission: { itemId: '', copied: false, opened: false, others: false, view: '', pick: -1 },
   };
 
+  const DGKEY = 'moonjang.demog.v1';   // 참관자의 모둠 학습 체험: 진행 상황은 이 브라우저에만 남는다
   function save() {
+    try { if (S.demo && S.group && S.group.demoId) sessionStorage.setItem(DGKEY, JSON.stringify(S.group)); } catch (e) { /* 무시 */ }
     try {
       sessionStorage.setItem(KEY, JSON.stringify({
         token: S.token, student: S.student, challenge: S.challenge, attempts: S.attempts,
@@ -118,6 +120,7 @@
       const me = await api('/api/me');
       S.demo = !!me.demo; S.round = me.round || null; S.student = me.student; S.stats = me.stats; S.history = me.history; S.posterOn = !!me.poster; S.padletTemplate = me.padletTemplate || ''; S.padlet = me.padlet || { post: false, link: '' };
       S.group = me.group || null;
+      if (S.demo && S.group && S.group.demoId) { try { const sv = JSON.parse(sessionStorage.getItem(DGKEY) || 'null'); if (sv && sv.demoId === S.group.demoId && sv.slots.length === S.group.slots.length) S.group = sv; } catch (e) { /* 새로 시작 */ } }
       const rid = S.round ? S.round.id : '';   // 저장해 둔 조건·결과가 지난 회차 것이면 버린다
       if (S.challenge && (S.challenge.rdId || '') !== rid) S.challenge = null;
       if (S.last) { const h0 = S.history.find((x) => x.id === S.last.id); if (h0 && h0.rd !== rid) { S.last = null; S.mission = null; } }
@@ -499,7 +502,7 @@
           h('ol', { class: 'mguide' }, guide.map((g) => h('li', null, g[0], h('b', null, g[1]), g[2]))), adBtn,
           lead ? h('div', { class: 'actions' }, h('button', { class: 'btn big' + (M.opened || !link ? ' primary' : ''), type: 'button', onclick: async () => {
             PS.done = true; save();
-            if (S.group && slot) { try { await api('/api/group/roomdone', { id: item.id }); slot.roomDone = Date.now(); } catch (e) { S.notice = e.message; } }
+            if (S.group && slot) { if (S.demo) { slot.roomDone = Date.now(); save(); } else { try { await api('/api/group/roomdone', { id: item.id }); slot.roomDone = Date.now(); } catch (e) { S.notice = e.message; } } }
             next();
           } }, S.group ? '포스터를 올렸어요 ✓ (모둠원 화면도 함께 완료돼요)' : '포스터를 올렸어요 ✓')) : h('div', { class: 'notice' }, '모둠장이 포스터를 올리고 [포스터를 올렸어요]를 누르면, 이 단계까지 모두 완료로 바뀌어요.')];
       }
@@ -565,6 +568,7 @@
   }
 
   async function refreshGroup() {
+    if (S.demo) return;   // 체험 모둠은 이 브라우저에서만 이어진다
     try { const r = await api('/api/group'); S.group = r.group; } catch (e) { /* 다음 번에 */ }
   }
 
@@ -582,8 +586,9 @@
       if (!text) return;
       btn.disabled = true; msg.hidden = true;
       try {
-        const r = await api('/api/group/note', { slot: sl.i, text });
-        S.group = r.group; NOTE_DRAFT[sl.i] = ''; NOTE_OPEN[sl.i] = true; gSig = '';
+        if (S.demo) { const me0 = S.student; sl.notes = (sl.notes || []).concat([{ id: 'd' + Date.now(), ts: Date.now(), sid: me0 && me0.sid, name: '나(체험)', text }]); save(); }
+        else { const r = await api('/api/group/note', { slot: sl.i, text }); S.group = r.group; }
+         NOTE_DRAFT[sl.i] = ''; NOTE_OPEN[sl.i] = true; gSig = '';
         const el = document.getElementById('group'); if (el) el.replaceWith(groupCard());
       } catch (e) { msg.hidden = false; msg.textContent = e.message; btn.disabled = false; }
     });
@@ -795,6 +800,13 @@
       S.last = r; S.attempts = r.attempt; S.flagged = false;
       S.stats.tries += 1;
       if (r.verdict === 'correct') S.stats.correct += 1;
+      if (S.demo && S.group && S.challenge && S.challenge.slot !== undefined) {   // 체험 모둠: 결과를 이 브라우저의 모둠 목록에 반영
+        const sl = S.group.slots.find((x) => x.i === S.challenge.slot);
+        if (sl) {
+          sl.tries = (sl.tries || 0) + 1;
+          if (r.verdict === 'correct' && sl.status !== 'done') { Object.assign(sl, { status: 'done', id: r.id, sentence: text, by: '나(체험)' }); S.group.done = S.group.slots.filter((x) => x.status === 'done').length; }
+        }
+      }
       if (S.group) {
         await refreshGroup();
         if (r.verdict !== 'incorrect' && S.challenge && S.challenge.slot !== undefined) { S.mission.pick = S.challenge.slot; }
