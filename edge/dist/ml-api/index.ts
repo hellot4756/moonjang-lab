@@ -368,7 +368,6 @@ const DEFAULT_SETTINGS = {
   groupCount: 8,         // 반별 모둠 수
   groupPlan: {},         // { 문장의 짜임 조건 id: 모둠이 만들 문장 수 }
   groupSeed: 1,          // 바꾸면 모든 모둠이 새 조건을 받는다
-  observerClasses: [],   // 참관 교사가 볼 수 있는 반(비어 있으면 모든 반)
   rounds: [],            // 활동 회차: [{ id, no, name, openedAt, closedAt, ... }] 닫힌 회차는 학생이 고칠 수 없다
 };
 function normName(s) {
@@ -502,7 +501,6 @@ class Store {
     if (typeof patch.groupMode === 'boolean') s.groupMode = patch.groupMode;
     if (Number.isInteger(patch.groupCount) && patch.groupCount >= 1 && patch.groupCount <= 30) s.groupCount = patch.groupCount;
     if (Number.isInteger(patch.groupSeed)) s.groupSeed = patch.groupSeed;
-    if (Array.isArray(patch.observerClasses)) s.observerClasses = [...new Set(patch.observerClasses.map((x) => String(x).trim().slice(0, 30)).filter(Boolean))].slice(0, 60);
     if (Array.isArray(patch.rounds)) {
       s.rounds = patch.rounds.slice(0, 200).map((x) => ({
         id: String(x.id).slice(0, 12), no: Number(x.no) || 0, name: String(x.name || '').slice(0, 40),
@@ -1824,7 +1822,6 @@ function teacherInfo() {
       topicChoice: store.settings.topicChoice !== false,
       groupMode: groupOn(), groupCount: store.settings.groupCount || 8, groupPlan: store.settings.groupPlan || {},
       observerPassword: store.settings.observerPassword || '',
-      observerClasses: store.settings.observerClasses || [],
       padletTemplate: store.settings.padletTemplate || '',
       padlet: {
         keySet: !!store.settings.padletApiKey, keyHint: maskKey(store.settings.padletApiKey || ''), lastError: store.padletErr,
@@ -1873,15 +1870,7 @@ function resultFields(out) {
     confidence: '', needsReview: true, pendingReason: out.message || 'AI 판정을 하지 못했어요.',
   };
 }
-function obsAllowed() {
-  const sel = store.settings.observerClasses || [];
-  if (!sel.length) return null;
-  const have = new Set(store.students.map((s) => s.cls));
-  const ok = sel.filter((c) => have.has(c));
-  return ok.length ? ok : ['\u0000'];   // 고른 반이 모두 명단에서 사라졌다면 아무 반도 보이지 않게
-}
 async function boardData(cls, mask) {
-      const allow = mask ? obsAllowed() : null;
       const { presence, activity } = await store.loadActivity();
       const now = Date.now();
       const lastBy = new Map();
@@ -1898,7 +1887,6 @@ async function boardData(cls, mask) {
       const classes = {};
       const students = [];
       for (const s of store.students) {
-        if (allow && !allow.includes(s.cls)) continue;
         classes[s.cls] = (classes[s.cls] || 0) + 1;
         if (cls && s.cls !== cls) continue;
         const online = (presence.get(s.sid) || 0) > now - 5 * 60 * 1000;
@@ -1919,7 +1907,7 @@ async function boardData(cls, mask) {
           tries: t.tries, correct: t.correct,
         });
       }
-  if (mask) for (const x of students) { x.name = (x.name || '').slice(0, 1) + '○'.repeat(Math.max(0, (x.name || '').length - 1)); x.sentence = ''; x.level = ''; }
+  if (mask) for (const x of students) { x.name = (x.name || '').slice(0, 1) + '0'.repeat(Math.max(0, (x.name || '').length - 1)); x.sentence = ''; x.level = ''; }
   return {
     students, seats: store.seats, cols: SEAT_COLS, groupMode: groupOn(),
     classes: Object.keys(classes).sort((a, b) => a.localeCompare(b, 'ko', { numeric: true })).map((c) => ({ cls: c, count: classes[c] })),
@@ -1960,11 +1948,9 @@ async function handleApi(req, res, pathname, query) {
     observerAuth(req);
     if (!store.settings.observerPassword) throw new HttpError(401, '참관 계정이 닫혔어요.');
     let cls = query.get('cls') || '';
-    const allow = obsAllowed();
-    if (allow && !allow.includes(cls)) cls = allow[0];
     if (!cls) cls = (store.students[0] || {}).cls || '';
     const d = await gboardData(cls, viewRound(''));
-    const mask = (n) => (n || '').slice(0, 1) + '○'.repeat(Math.max(0, (n || '').length - 1));
+    const mask = (n) => (n || '').slice(0, 1) + '0'.repeat(Math.max(0, (n || '').length - 1));
     for (const g of d.groups) {
       for (const m of g.members) { m.name = mask(m.name); m.sid = ''; }
       for (const x of g.slots) { x.sentence = ''; x.by = ''; x.id = ''; x.noteN = (x.notes || []).length; x.notes = []; }
@@ -2259,7 +2245,6 @@ async function handleApi(req, res, pathname, query) {
       if (b.groupReseed) patch.groupSeed = (Number(store.settings.groupSeed) || 1) + 1;
       if (typeof b.padletTemplate === 'string') patch.padletTemplate = b.padletTemplate;
       if (typeof b.observerPassword === 'string') patch.observerPassword = b.observerPassword;
-      if (Array.isArray(b.observerClasses)) patch.observerClasses = b.observerClasses;
       if (typeof b.apiKey === 'string' && b.apiKey.trim()) patch.apiKey = b.apiKey;
       if (b.clearApiKey) patch.apiKey = '';
       if (typeof b.model === 'string') patch.model = b.model;
