@@ -505,7 +505,7 @@
       }
       if (id === 'others') {
         return [h('p', { class: 'mhelp' }, p2 ? '우리 반 친구들이 올린 포스터를 구경해 보세요.' : '우리 반 친구들이 패들렛에 올린 광고문구를 모두 모아서 볼 수 있어요.'),
-          h('div', { class: 'actions' }, h('a', { class: 'btn primary big', href: S.padlet.all, target: '_blank', rel: 'noopener', onclick: () => { M.others = true; save(); setTimeout(redraw, 0); } }, '다른 친구들 포스터 보러가기 →'))];
+          h('div', { class: 'actions' }, h('a', { class: 'btn primary big', href: S.padlet.all, target: '_blank', rel: 'noopener', onclick: () => { M.others = true; save(); setTimeout(redraw, 0); } }, p2 ? '다른 친구들 포스터 보러가기 →' : '다른 친구들이 올린 글 보러 가기 →'))];
       }
       return [];
     };
