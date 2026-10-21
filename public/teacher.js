@@ -990,11 +990,14 @@
     // 패들렛 연결: 학생이 자기 번호의 섹션(소회의실)에 바로 올리게 한다
     const pInfo = info.settings.padlet || { keySet: false, classes: {} };
     const pkey = h('input', { type: 'password', id: 'pkey', autocomplete: 'off', placeholder: pInfo.keySet ? pInfo.keyHint + ' (바꾸려면 새 키 입력)' : '패들렛 개발자 설정의 API 키' });
+    let pkind = info.settings.groupMode ? 'group' : 'solo';   // 연결 대상: 개인 활동용 / 모둠 활동용
+    const kindRow = h('div', { class: 'chips' });
     const pmsg = h('div', { hidden: true });
     const pshow = (t, cls) => { pmsg.className = 'notice ' + cls; pmsg.textContent = t; pmsg.hidden = false; };
     const pcls = h('select', { id: 'pcls', 'aria-label': '반 선택' }, h('option', { value: '' }, '반 선택'));
     const pboard = h('input', { type: 'text', id: 'pboard', autocomplete: 'off', placeholder: '위에서 주소를 불러오면 자동으로 채워져요' });
     const prooms = h('textarea', { id: 'prooms', rows: '8', style: 'font-family:ui-monospace,Consolas,monospace;font-size:.85rem', placeholder: '번호  섹션ID(sec_…)  소회의실 링크(https://padlet.com/…)\n1  sec_AbCd…  https://padlet.com/…/breakout-room/…' });
+    const roomsLabel = h('span', null, '');
     const purl = h('input', { type: 'text', id: 'purl', autocomplete: 'off', placeholder: '예: https://padlet.com/내아이디/제목-abcd1234efgh5678' });
     const pall = h('input', { type: 'text', id: 'pall', autocomplete: 'off', placeholder: '예: https://padlet.com/내아이디/제목-abcd1234efgh5678' });
     const puseAi = h('input', { type: 'checkbox', id: 'puseai', checked: true });
@@ -1005,14 +1008,14 @@
       if (!T.info.settings.padlet.keySet && !pkey.value.trim()) { pshow('패들렛 API 키를 먼저 입력하고 [저장]해 주세요.', 'bad'); return; }
       pshow('보드를 읽고 명단과 맞추는 중이에요…', 'info'); pres.hidden = true;
       try {
-        const o = await api('/api/teacher/padlet/import', { cls: pcls.value, url: purl.value, useAi: puseAi.checked });
+        const o = await api('/api/teacher/padlet/import', { cls: pcls.value, url: purl.value, useAi: puseAi.checked, kind: pkind });
         if (!o.ok) { pshow(o.message + (o.detail ? ' · ' + o.detail : ''), 'bad'); return; }
         pboard.value = o.boardId; prooms.value = o.roomsText; if (o.boardUrl) purl.value = o.boardUrl;
         pres.replaceChildren(
           h('p', null, h('b', null, `「${o.title || '제목 없음'}」`), ` 섹션 ${o.total}개 중 ${o.matched}개를 명단과 맞췄어요 (규칙 ${o.byRule}개${o.aiAsked ? `, AI ${o.aiUsed}개` : ''}).`),
           o.aiError ? h('p', { class: 'muted' }, 'AI 해석은 건너뛰었어요: ' + o.aiError) : null,
           o.unmatched.length ? h('p', null, h('b', null, '맞추지 못한 섹션: '), o.unmatched.slice(0, 12).map((u) => u.title + (u.note ? `(${u.note})` : '')).join(' · ') + (o.unmatched.length > 12 ? ` 외 ${o.unmatched.length - 12}개` : '')) : null,
-          o.missing.length ? h('p', null, h('b', null, '섹션이 없는 학생: '), o.missing.slice(0, 20).map((m) => `${m.no}번 ${m.name}`).join(', ') + (o.missing.length > 20 ? ` 외 ${o.missing.length - 20}명` : '')) : null,
+          o.missing.length ? h('p', null, h('b', null, pkind === 'group' ? '섹션이 없는 모둠: ' : '섹션이 없는 학생: '), o.missing.slice(0, 20).map((m) => pkind === 'group' ? `${m.no}모둠` : `${m.no}번 ${m.name}`).join(', ') + (o.missing.length > 20 ? ` 외 ${o.missing.length - 20}개` : '')) : null,
           o.linksMissing ? h('p', { class: 'muted' }, `소회의실 링크는 패들렛이 API로 주지 않아요. 링크가 비어 있는 방 ${o.linksMissing}개는 아래 목록 줄 끝에 직접 붙여 넣어 주세요(없어도 바로 올리기는 돼요).`) : null,
           h('p', null, '아래 목록을 확인한 뒤 ', h('b', null, '[저장]'), '을 눌러야 적용돼요.'));
         pres.hidden = false; pshow('불러왔어요. 확인하고 저장해 주세요.', 'ok');
@@ -1020,19 +1023,26 @@
     } }, '섹션 자동 불러오기');
     const pstat = h('p', { class: 'muted small' });
     const refreshStat = () => {
-      const c = (T.info.settings.padlet.classes || {})[pcls.value];
-      pstat.textContent = !pcls.value ? '' : c ? `이 반: 방 ${c.rooms}개 등록 (바로 올리기 ${c.withSection}개, 방 열기 링크 ${c.withLink}개)` : '이 반은 아직 등록하지 않았어요.';
+      const c = ((pkind === 'group' ? T.info.settings.padlet.groupClasses : T.info.settings.padlet.classes) || {})[pcls.value];
+      const nm = pkind === 'group' ? '모둠용' : '개인용';
+      pstat.textContent = !pcls.value ? '' : c && c.rooms ? `이 반 ${nm}: 방 ${c.rooms}개 등록 (바로 올리기 ${c.withSection}개, 방 열기 링크 ${c.withLink}개)` : `이 반 ${nm} 연결은 아직 등록하지 않았어요.`;
     };
     api('/api/teacher/overview').then((o) => { for (const c of o.classes) pcls.append(h('option', { value: c.cls }, `${c.cls} (${c.count}명)`)); }).catch(() => {});
-    pcls.addEventListener('change', async () => {
+    const loadKind = async () => {
       pboard.value = ''; prooms.value = ''; purl.value = ''; pall.value = ''; refreshStat();
       if (!pcls.value) return;
-      try { const r = await api('/api/teacher/padlet/rooms?' + qs({ cls: pcls.value })); pboard.value = r.boardId; prooms.value = r.roomsText; purl.value = r.boardUrl || ''; pall.value = r.allUrl || ''; } catch (e) { pshow(e.message, 'bad'); }
-    });
+      try { const r = await api('/api/teacher/padlet/rooms?' + qs({ cls: pcls.value, kind: pkind })); pboard.value = r.boardId; prooms.value = r.roomsText; purl.value = r.boardUrl || ''; pall.value = r.allUrl || ''; } catch (e) { pshow(e.message, 'bad'); }
+    };
+    pcls.addEventListener('change', loadKind);
+    const drawKind = () => {
+      kindRow.replaceChildren(...[['solo', '개인 활동용 (번호별 방)'], ['group', '모둠 활동용 (모둠별 방)']].map(([v, name]) => h('button', { type: 'button', class: 'chip' + (pkind === v ? ' on' : ''), 'aria-pressed': String(pkind === v), onclick: () => { pkind = v; drawKind(); loadKind(); } }, name)));
+      roomsLabel.textContent = pkind === 'group' ? '모둠 번호별 섹션 ID·링크 (한 줄에 한 모둠: 1모둠이면 맨 앞에 1. 학생 번호가 아니라 모둠 번호예요)' : '번호별 섹션 ID·링크 (한 줄에 한 명, 엑셀에서 복사해 붙여 넣어도 돼요)';
+    };
+    drawKind();
     const psave = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
       try {
         const b = {}; if (pkey.value.trim()) b.apiKey = pkey.value;
-        if (pcls.value) { b.cls = pcls.value; b.boardId = pboard.value; b.roomsText = prooms.value; b.boardUrl = /^https:\/\/padlet\.com\//.test(purl.value.trim()) ? purl.value.trim() : ''; b.allUrl = /^https:\/\/padlet\.com\//.test(pall.value.trim()) ? pall.value.trim() : ''; }
+        if (pcls.value) { b.cls = pcls.value; b.kind = pkind; b.boardId = pboard.value; b.roomsText = prooms.value; b.boardUrl = /^https:\/\/padlet\.com\//.test(purl.value.trim()) ? purl.value.trim() : ''; b.allUrl = /^https:\/\/padlet\.com\//.test(pall.value.trim()) ? pall.value.trim() : ''; }
         if (!Object.keys(b).length) { pshow('저장할 내용이 없어요.', 'bad'); return; }
         const o = await api('/api/teacher/padlet', b, 'PUT'); T.info = o; pkey.value = '';
         pshow('저장했어요.' + (o.skipped && o.skipped.length ? ` 읽지 못한 줄 ${o.skipped.length}개: ${o.skipped.slice(0, 3).join(' | ')}` : ''), 'ok'); refreshStat();
@@ -1041,7 +1051,7 @@
     const ptest = h('button', { class: 'btn', type: 'button', onclick: async () => {
       if (!pcls.value) { pshow('반을 먼저 선택해 주세요.', 'bad'); return; }
       pshow('연결을 시험하는 중이에요…', 'info');
-      try { const o = await api('/api/teacher/padlet/test', { cls: pcls.value }); pshow(o.ok ? '키와 보드 ID가 맞아요. (글은 올리지 않았어요)' : o.message + (o.detail ? ' · ' + o.detail : ''), o.ok ? 'ok' : 'bad'); } catch (e) { pshow(e.message, 'bad'); }
+      try { const o = await api('/api/teacher/padlet/test', { cls: pcls.value, kind: pkind }); pshow(o.ok ? '키와 보드 ID가 맞아요. (글은 올리지 않았어요)' : o.message + (o.detail ? ' · ' + o.detail : ''), o.ok ? 'ok' : 'bad'); } catch (e) { pshow(e.message, 'bad'); }
     } }, '연결 시험');
     const pclear = h('button', { class: 'btn danger', type: 'button', onclick: async () => {
       if (!confirm('저장된 패들렛 API 키를 지울까요? 학생 화면의 [바로 올리기]가 사라져요.')) return;
@@ -1053,13 +1063,14 @@
         h('p', null, h('span', { class: 'pill ' + (pInfo.keySet ? 'ok' : 'warn') }, pInfo.keySet ? 'API 키 저장됨' : 'API 키가 필요해요'), ' ', pInfo.keySet ? h('span', { class: 'muted small' }, pInfo.keyHint) : null,
           pInfo.lastError ? h('span', { class: 'pill bad', style: 'margin-left:8px', title: pInfo.lastError }, '최근 오류: ' + pInfo.lastError) : null),
         h('label', { class: 'field', for: 'pkey' }, 'Padlet API 키', pkey),
+        h('div', { class: 'field' }, h('span', null, '연결 대상 (개인 활동과 모둠 활동은 연결을 따로 저장해요. 지금 수업 방식에 맞는 것이 학생에게 쓰여요)'), kindRow),
         h('label', { class: 'field', for: 'pcls' }, '반', pcls),
         h('label', { class: 'field', for: 'purl' }, '패들렛 주소 (보드 주소를 복사해 붙여 넣으세요. 저장하면 학생의 [방 열기] 버튼이 이 주소로 가요. 번호별 소회의실 링크를 따로 넣으면 그 링크가 우선이에요)', purl),
         h('label', { class: 'field', for: 'pall' }, '모두의 결과물 보기 링크 (이 반 학생이 [③ 포스터 업로드 완료]를 누르면 [다른 친구들 포스터 보러가기] 버튼이 나타나요. 비워 두면 ③ 버튼이 안 보여요)', pall),
         h('label', { class: 'check-line' }, puseAi, ' 규칙으로 못 읽은 섹션 제목은 AI에게 번호를 물어보기 (제목만 보내고 학생 이름·명단은 보내지 않아요)'),
         h('div', { class: 'toolbar' }, pimport), pres,
         h('label', { class: 'field', for: 'pboard' }, '보드 ID', pboard),
-        h('label', { class: 'field', for: 'prooms' }, '번호별 섹션 ID·링크 (한 줄에 한 명, 엑셀에서 복사해 붙여 넣어도 돼요)', prooms),
+        h('label', { class: 'field', for: 'prooms' }, roomsLabel, prooms),
         pstat,
         h('div', { class: 'toolbar' }, psave, ptest, pclear), pmsg));
 
@@ -1231,7 +1242,7 @@
       clsSel.addEventListener('change', loadAssign);
       drawMode(); drawPlan();
       return h('section', { class: 'card' }, h('h2', null, '모둠 활동'),
-        h('p', { class: 'muted small' }, '모둠 활동으로 바꾸면 학생이 로그인 뒤 모둠 번호를 고르고, 같은 모둠은 같은 조건과 진행 화면을 함께 봐요. 문장 하나씩 포스터를 만들고, 패들렛 방은 「방 번호 = 모둠 번호」로 연결돼요(위 패들렛 연결의 번호 칸에 모둠 번호를 쓰세요).'),
+        h('p', { class: 'muted small' }, '모둠 활동으로 바꾸면 학생이 로그인 뒤 모둠 번호를 고르고, 같은 모둠은 같은 조건과 진행 화면을 함께 봐요. 문장 하나씩 포스터를 만들고, 패들렛은 [패들렛 연결]에서 「모둠 활동용」을 따로 등록해요(개인용 설정과 섞이지 않아요).'),
         h('div', { class: 'wrap', style: 'max-width:560px' }, h('div', { class: 'field' }, h('span', null, '활동 방식'), modeRow),
           h('label', { class: 'field' }, '모둠 수 (반마다 같은 수)', countIn),
           h('div', { class: 'field' }, h('span', null, '문장의 짜임 종류별로 모둠이 만들 문장 수 (조건 종류는 [조건 관리] 탭에서 바꿔요)')),),
