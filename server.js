@@ -40,6 +40,7 @@ function loadEnv() {
 const createdPassword = loadEnv();
 
 const PADLET = require('./lib/padlet');
+const IMAGES = require('./lib/images');
 const PosterLib = require('./public/poster.js');
 const { Store, normName, normSid, classFromSid, numberFromSid, finalVerdict, SEAT_COLS } = require('./lib/store');
 const { Grader } = require('./lib/grader');
@@ -51,6 +52,7 @@ const TEACHER_PASSWORD = process.env.TEACHER_PASSWORD || '';
 const DEFAULT_MODEL = 'claude-sonnet-5-5';
 const DEFAULT_GEMINI = 'gemini-3.8-flash';
 
+const imgBusy = new Set();
 const store = new Store(DATA_DIR);
 C.init(path.join(DATA_DIR, 'conditions.json'));
 function aiConfig(which) {
@@ -315,7 +317,7 @@ function groupData(cls, no, rid) {
       const okRec = mine.filter((r) => finalVerdict(r) === 'correct').pop() || null;
       const pend = okRec ? null : mine.filter((r) => finalVerdict(r) === 'pending').pop() || null;
       const rec = okRec || pend || mine[mine.length - 1];
-      return { i, conds: null, tries: mine.length, status: okRec ? 'done' : pend ? 'pending' : 'todo', id: rec.id, sentence: rec.sentence, by: rec.name, topic: rec.topicLabel, comp: rec.compLabel, struct: rec.structLabel, padletAt: rec.padletAt || 0, poster: rec.poster || null, roomDone: rec.roomDone || 0, notes: notesOf(`${cls}|${no}`, cid) };
+      return { i, conds: null, tries: mine.length, status: okRec ? 'done' : pend ? 'pending' : 'todo', id: rec.id, sentence: rec.sentence, by: rec.name, topic: rec.topicLabel, comp: rec.compLabel, struct: rec.structLabel, padletAt: rec.padletAt || 0, poster: rec.poster || null, imgN: rec.imgN || 0, posterImg: rec.posterImg || null, roomDone: rec.roomDone || 0, notes: notesOf(`${cls}|${no}`, cid) };
     });
     out.total = out.slots.length;
     out.done = out.slots.filter((x) => x.status === 'done').length;
@@ -334,7 +336,7 @@ function groupData(cls, no, rid) {
       status: okRec ? 'done' : pend ? 'pending' : 'todo',
       id: rec ? rec.id : '', sentence: rec ? rec.sentence : '', by: rec ? rec.name : '', topic: rec ? rec.topicLabel : (view ? view.topic.label : ''),
       comp: res ? res.comp.label : '', struct: res ? res.struct.label : '', padletAt: rec ? rec.padletAt || 0 : 0,
-      poster: rec && rec.poster ? rec.poster : null, roomDone: rec ? rec.roomDone || 0 : 0,
+      poster: rec && rec.poster ? rec.poster : null, imgN: rec ? rec.imgN || 0 : 0, posterImg: rec ? rec.posterImg || null : null, roomDone: rec ? rec.roomDone || 0 : 0,
       notes: notesOf(`${cls}|${no}`, sl.n),
     };
   });
@@ -422,7 +424,7 @@ function myHistory(st, limit) {
       id: r.id, ts: r.ts, attempt: r.attempt, sentence: r.sentence, rd, rdName: names.get(rd) || '',
       verdict: finalVerdict(r), flagged: !!r.flagged, by: r.gk ? r.name : '', gno: r.gno || 0,
       tfeedback: r.tfeedback || '', tfeedbackAt: r.tfeedbackAt || 0, padletAt: r.padletAt || 0,
-      poster: r.poster && r.poster.prompt ? { prompt: r.poster.prompt } : null,
+      poster: r.poster && r.poster.prompt ? { prompt: r.poster.prompt } : null, imgN: r.imgN || 0, posterImg: r.posterImg || null,
       comp: r.compLabel, struct: r.structLabel, topic: r.topicLabel,
     });
   }
@@ -510,6 +512,7 @@ function teacherInfo() {
       revealAfter: store.settings.revealAfter,
       model: store.settings.model,
       geminiModel: store.settings.geminiModel || '',
+      imageGen: !!store.settings.imageGen, imageModel: store.settings.imageModel || '', imageMax: store.settings.imageMax || 2,
       aiMode: store.settings.aiMode === 'off' ? 'off' : 'on',
       poster: store.settings.poster !== false,
       topicChoice: store.settings.topicChoice !== false,
@@ -695,6 +698,7 @@ async function handleApi(req, res, pathname, query) {
       round: st.demo ? { id: 'demo', no: 0, name: '체험' } : roundPub(ar),
       open: store.settings.open,
       poster: store.settings.poster !== false,
+      imageGen: !!store.settings.imageGen && !!(store.settings.geminiApiKey || process.env.GEMINI_API_KEY), imageMax: store.settings.imageMax || 2,
       topicChoice: store.settings.topicChoice !== false,
       topicList: store.settings.topicChoice !== false ? C.snapshot().topics.filter((x) => !x.off).map((x) => x.label) : [],
       padletTemplate: store.settings.padletTemplate || '',
@@ -831,6 +835,50 @@ async function handleApi(req, res, pathname, query) {
     padletLastError = '';
     store.patchRecord(rec.id, { padletAt: Date.now() });
     return send(res, 200, { ok: true, at: Date.now(), link: room.link || '' });
+  }
+
+  // 학생이 만든 포스터 프롬프트로 Gemini 이미지를 만들어, 바로 그 학생(모둠) 패들렛 방에 올린다. 문장(학생·모둠)당 횟수를 제한한다.
+  if (method === 'POST' && pathname === '/api/poster/image') {
+    const st = studentAuth(req);
+    if (st.demo) return send(res, 200, { ok: true, demo: true, left: 1 });
+    if (!store.settings.imageGen) throw new HttpError(403, '지금은 이미지 만들기가 닫혀 있어요.');
+    if (!activeRound()) throw new HttpError(403, '지금 열려 있는 회차가 없어요.');
+    const gcfg = aiConfig('gemini');
+    if (!gcfg.apiKey) throw new HttpError(400, 'Gemini API 키가 아직 없어요. 선생님께 알려 주세요.');
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) throw new HttpError(400, '이미지 저장소가 연결되지 않은 서버예요. 선생님께 알려 주세요.');
+    if (rateLimited('img:' + st.sid, 4, 60 * 1000)) throw new HttpError(429, '너무 빨리 누르고 있어요. 잠시 뒤에 다시 해 주세요.');
+    const b = await readBody(req, 16 * 1024);
+    const rec = store.getRecord(String(b.id || ''));
+    if (!rec || (rec.sid !== st.sid && !(rec.gk && rec.gk === groupKey(st)))) throw new HttpError(404, '문장을 찾지 못했어요.');
+    if (recRound(rec) !== activeRound().id) throw new HttpError(403, '끝난 회차의 내용은 고칠 수 없어요.');
+    if (finalVerdict(rec) !== 'correct') throw new HttpError(400, '문법 조건을 통과한 문장만 이미지를 만들 수 있어요.');
+    if (rec.gk) requireLeader(st);
+    const prompt = String(b.prompt || '').trim().slice(0, 4000);
+    if (!prompt) throw new HttpError(400, '프롬프트가 비어 있어요.');
+    const max = store.settings.imageMax || 2;
+    if ((rec.imgN || 0) >= max) throw new HttpError(429, `이 문장은 이미지를 ${max}번 모두 만들었어요.`);
+    if (imgBusy.has(rec.id)) throw new HttpError(429, '이미지를 만드는 중이에요. 잠시만 기다려 주세요.');
+    imgBusy.add(rec.id);
+    store.patchRecord(rec.id, { imgN: (rec.imgN || 0) + 1 });   // 먼저 한 번 쓴 것으로 치고, 실패하면 돌려준다
+    const refund = () => store.patchRecord(rec.id, { imgN: Math.max(0, (store.getRecord(rec.id).imgN || 1) - 1) });
+    try {
+      const g = await IMAGES.generate({ key: gcfg.apiKey, base: gcfg.baseUrl ? gcfg.baseUrl.replace(/\/+$/, '') + '/v1beta' : '', model: store.settings.imageModel || process.env.GEMINI_IMAGE_MODEL || '', prompt });
+      if (!g.ok) { refund(); throw new HttpError(502, g.message); }
+      const url = await IMAGES.save({ buf: g.buf, mime: g.mime, name: `${rec.id}-${Date.now().toString(36)}`, env: process.env });
+      if (!url) { refund(); throw new HttpError(502, '이미지를 저장하지 못했어요. 선생님께 알려 주세요.'); }
+      const mine = store.getRecord(rec.id);
+      store.patchRecord(rec.id, { posterImg: { url, at: Date.now(), by: st.name, prompt }, posterImgs: [...(mine.posterImgs || []), url].slice(-10) });
+      let posted = false, link = '', pmsg = '';
+      const { cfg, room } = padletRoom(st);
+      if (store.settings.padletApiKey && cfg && cfg.boardId && room && room.section) {
+        const gno = rec.gk ? store.groupOf(st.sid) : 0;
+        const gp = gno ? PosterLib.groupPadlet({ no: gno, names: groupMembers(st.cls, gno).map((x) => x.name), comp: rec.compLabel, struct: rec.structLabel, topic: rec.topicLabel, sentence: rec.sentence }) : null;
+        const out = await PADLET.createPost({ key: store.settings.padletApiKey, boardId: cfg.boardId, section: room.section, subject: gp ? gp.subject : `${st.no ? st.no + '번 ' : ''}${st.name}`, body: gp ? gp.body : rec.sentence, imageUrl: url });
+        if (out.ok) { posted = true; link = room.link || ''; store.patchRecord(rec.id, { padletAt: Date.now() }); padletLastError = ''; }
+        else { pmsg = out.message || '패들렛에 올리지 못했어요.'; padletLastError = `${new Date().toLocaleTimeString('ko-KR')} ${st.cls} ${st.no}번(이미지): ${out.status || '연결 실패'} ${out.detail || ''}`.slice(0, 300); console.log('[패들렛 오류]', padletLastError); }
+      } else pmsg = '내 패들렛 방이 아직 연결되지 않아 이미지는 여기에만 보여 줘요.';
+      return send(res, 200, { ok: true, url, posted, link, padletMessage: pmsg, left: Math.max(0, max - (store.getRecord(rec.id).imgN || 0)) });
+    } finally { imgBusy.delete(rec.id); }
   }
 
   if (method === 'POST' && pathname === '/api/submit') {
@@ -1006,9 +1054,21 @@ async function handleApi(req, res, pathname, query) {
       if (typeof b.geminiKey === 'string' && b.geminiKey.trim()) patch.geminiApiKey = b.geminiKey;
       if (b.clearGeminiKey) patch.geminiApiKey = '';
       if (typeof b.geminiModel === 'string') patch.geminiModel = b.geminiModel;
+      if (b.imageGen !== undefined) patch.imageGen = !!b.imageGen;
+      if (typeof b.imageModel === 'string') patch.imageModel = b.imageModel;
+      if (b.imageMax !== undefined) patch.imageMax = parseInt(b.imageMax, 10);
       store.updateSettings(patch);
       grader.cache.clear();
       return send(res, 200, teacherInfo());
+    }
+
+    // 이미지 만들기 시험: 작은 그림 하나를 만들어 키·모델이 되는지만 확인한다 (패들렛에는 올리지 않는다)
+    if (method === 'POST' && pathname === '/api/teacher/image-test') {
+      const gcfg = aiConfig('gemini');
+      const g = await IMAGES.generate({ key: gcfg.apiKey, base: gcfg.baseUrl ? gcfg.baseUrl.replace(/\/+$/, '') + '/v1beta' : '', model: store.settings.imageModel || process.env.GEMINI_IMAGE_MODEL || '', prompt: 'A simple flat illustration of a red apple on a white background.' });
+      if (!g.ok) return send(res, 200, { ok: false, message: g.message });
+      const url = await IMAGES.save({ buf: g.buf, mime: g.mime, name: 'test-' + Date.now().toString(36), env: process.env });
+      return send(res, 200, { ok: true, url: url || '', stored: !!url, message: url ? '이미지 만들기와 저장이 모두 잘 돼요.' : '이미지는 만들어졌지만 저장소(ml-poster 버킷)를 쓸 수 없어요.' });
     }
 
     // 모둠 편성 현황: 반별 학생의 모둠과 모둠별 진행(완성한 문장 수)

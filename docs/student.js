@@ -2,6 +2,7 @@
 (function () {
   const app = document.getElementById('app');
   const KEY = 'moonjang.student.v1';
+  const IMGS = {};   // 문장별 이미지 만들기 상태
 
   function h(tag, props, ...kids) {
     const el = document.createElement(tag);
@@ -134,7 +135,7 @@
   async function enter() {
     try {
       const me = await api('/api/me');
-      S.demo = !!me.demo; S.round = me.round || null; S.student = me.student; S.stats = me.stats; S.history = me.history; S.posterOn = !!me.poster; S.padletTemplate = me.padletTemplate || ''; S.padlet = me.padlet || { post: false, link: '' };
+      S.demo = !!me.demo; S.round = me.round || null; S.student = me.student; S.stats = me.stats; S.history = me.history; S.posterOn = !!me.poster; S.imageGen = !!me.imageGen; S.imageMax = me.imageMax || 2; S.padletTemplate = me.padletTemplate || ''; S.padlet = me.padlet || { post: false, link: '' };
       S.group = me.group || null;
       if (S.demo && S.group && S.group.demoId) { try { const sv = JSON.parse(sessionStorage.getItem(DGKEY) || 'null'); if (sv && sv.demoId === S.group.demoId && sv.slots.length === S.group.slots.length) S.group = sv; } catch (e) { /* 새로 시작 */ } }
       const rid = S.round ? S.round.id : '';   // 저장해 둔 조건·결과가 지난 회차 것이면 버린다
@@ -506,6 +507,30 @@
           ['"그리려는 내용 입력하기" 칸에 복사한 프롬프트를 붙여 넣고(Ctrl+V) ', '오른쪽 화살표(→)', '를 눌러요.'],
           ['만들어진 그림 중 마음에 드는 포스터를 골라 ', '올려요.', ''],
         ];
+        const imgBox = (() => {
+          if (!S.imageGen || !S.posterOn || !PS.out || !item.id) return null;
+          const key = String(item.id), mx = S.imageMax || 2;
+          const IM = (IMGS[key] = IMGS[key] || { n: item.imgN || 0, url: (item.posterImg && item.posterImg.url) || '', busy: false, msg: '', warn: '' });
+          IM.n = Math.max(IM.n, item.imgN || 0);
+          const left = Math.max(0, mx - IM.n);
+          if (!lead) return IM.url ? h('div', { class: 'notice' }, '모둠장이 만든 포스터예요.', h('div', null, h('img', { src: IM.url, alt: '만들어진 포스터', style: 'max-width:100%;max-height:360px;margin-top:6px;border-radius:8px' }))) : null;
+          const go = async (ev) => {
+            if (S.demo) { IM.msg = '체험 모드에서는 이미지를 만들지 않아요.'; redraw(); return; }
+            IM.busy = true; IM.msg = ''; IM.warn = ''; redraw();
+            try {
+              const o = await api('/api/poster/image', { id: item.id, prompt: PS.out.en || PS.out.ko });
+              IM.n = Math.max(IM.n + 1, mx - o.left); IM.url = o.url;
+              IM.msg = o.posted ? '패들렛에 올렸어요! 패들렛에서 확인해 보세요.' : ''; IM.warn = o.posted ? '' : (o.padletMessage || '패들렛에는 올리지 못했어요. 선생님께 알려 주세요.');
+              M.opened = true; save();
+            } catch (e) { IM.warn = e.message; }
+            IM.busy = false; redraw();
+          };
+          return h('div', { class: 'notice' }, h('b', null, '🎨 프롬프트로 바로 포스터 만들기'),
+            h('p', { class: 'small', style: 'margin:4px 0' }, `한 문장당 ${mx}번까지 만들 수 있어요. 만든 그림은 자동으로 패들렛 방에 올라가요. (남은 횟수: ${left}번)`),
+            h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'button', disabled: IM.busy || left < 1 || null, onclick: go }, IM.busy ? '만드는 중… (10~30초)' : left < 1 ? '횟수를 모두 썼어요' : IM.n ? '다시 만들어 올리기' : '이미지 만들어 올리기')),
+            IM.msg ? h('p', { class: 'small', role: 'status' }, IM.msg) : null, IM.warn ? h('p', { class: 'small', style: 'color:#b3261e', role: 'alert' }, IM.warn) : null,
+            IM.url ? h('img', { src: IM.url, alt: '만들어진 포스터', style: 'max-width:100%;max-height:360px;margin-top:6px;border-radius:8px' }) : null);
+        })();
         const needCopy = lead && S.posterOn && !M.copied && PS.out;
         const reCopy = needCopy ? h('div', { class: 'notice warn' }, '프롬프트를 아직 복사하지 않았어요. ', h('button', { class: 'btn sm', type: 'button', onclick: async () => { const ok = await copyText(PS.out[PS.lang === 'en' ? 'en' : 'ko'], document.createElement('textarea')); if (ok) { M.copied = true; save(); redraw(); } } }, '지금 복사하기')) : null;
         const adTa = !S.padlet.post && lead ? (() => {
@@ -514,7 +539,7 @@
           return window.Poster.fillTemplate(S.padletTemplate, { '이름': st.name, '학번': st.sid, '반': st.cls, '광고문구': item.sentence, '성분조건': item.comp, '짜임조건': item.struct, '주제': item.topic });
         })() : '';
         const adBtn = !S.padlet.post && lead ? h('div', { class: 'notice' }, S.group ? '모둠 소개 글을 올리려면 ' : '글에 광고문구도 함께 적고 싶다면 ', h('button', { class: 'btn sm', type: 'button', onclick: async (ev) => { const ok = await copyText(adTa, document.createElement('textarea')); ev.target.textContent = ok ? '복사했어요 (본문에 붙여 넣기)' : '복사가 안 돼요'; } }, '광고 글 복사하기'), S.group ? ' 를 누르고 붙여 넣으세요. (첫 줄은 제목, 나머지는 본문이에요. 프롬프트를 붙여 넣은 뒤에 하세요)' : ' 를 누르고 본문에 붙여 넣으세요. (프롬프트를 붙여 넣은 뒤에 하세요)') : null;
-        return [reCopy, link || h('div', { class: 'notice warn' }, '내 패들렛 방 주소가 아직 등록되지 않았어요. 선생님이 안내한 패들렛 방으로 직접 이동해 주세요.'),
+        return [imgBox, reCopy, link || h('div', { class: 'notice warn' }, '내 패들렛 방 주소가 아직 등록되지 않았어요. 선생님이 안내한 패들렛 방으로 직접 이동해 주세요.'),
           h('ol', { class: 'mguide' }, guide.map((g) => h('li', null, g[0], h('b', null, g[1]), g[2]))), adBtn,
           lead ? h('div', { class: 'actions' }, h('button', { class: 'btn big' + (M.opened || !link ? ' primary' : ''), type: 'button', onclick: async () => {
             PS.done = true; save();

@@ -1283,7 +1283,31 @@
 
     const dataCard = h('section', { class: 'card' }, h('h2', null, '자료 보관'),
       h('p', { class: 'muted' }, '명단과 모든 제출 기록은 프로그램 폴더 안의 data 폴더에 저장돼요. 이 폴더를 복사해 두면 백업이 되고, 새 컴퓨터로 옮길 때도 그대로 쓸 수 있어요.'));
-    body.append(...[h('div', { class: 'two' }, classCard, modeCard), info.settings.aiMode === 'off' ? h('p', { class: 'muted small' }, 'AI 없이 선생님이 직접 판정하는 방식이라 아래 AI 연결과 판정 시험은 사용하지 않아요.') : null, h('div', { class: 'two' }, aiCard, padCard), groupCard, padletCard, obsCard, tryBox, dataCard].filter(Boolean));
+    // 이미지 만들기 (Gemini)
+    const igOn = h('select', { id: 'igon' }, h('option', { value: '0' }, '닫기 (학생은 패들렛에서 직접 만들기)'), h('option', { value: '1' }, '열기: 학생이 프롬프트로 이미지를 만들어 패들렛에 바로 올리기'));
+    igOn.value = info.settings.imageGen ? '1' : '0';
+    const igMax = h('select', { id: 'igmax' }, ...[1, 2, 3, 4, 5].map((n) => h('option', { value: String(n) }, `문장(학생·모둠)당 ${n}번`)));
+    igMax.value = String(info.settings.imageMax || 2);
+    const igModel = h('input', { id: 'igmodel', type: 'text', placeholder: '비워 두면 gemini-nano-banana-2.1', value: info.settings.imageModel || '' });
+    const igMsg = h('p', { class: 'muted small', role: 'status' });
+    const igSave = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
+      try { T.info = await api('/api/teacher/settings', { imageGen: igOn.value === '1', imageMax: parseInt(igMax.value, 10), imageModel: igModel.value }, 'PUT'); toast('저장했어요.'); } catch (e) { toast(e.message, true); }
+    } }, '저장');
+    const igTest = h('button', { class: 'btn', type: 'button', onclick: async () => {
+      igMsg.textContent = '시험 이미지를 만드는 중… (최대 30초)'; igTest.disabled = true;
+      try { const o = await api('/api/teacher/image-test', {}, 'POST'); igMsg.textContent = (o.ok ? '✅ ' : '⚠️ ') + o.message; if (o.url) igMsg.append(' ', h('a', { href: o.url, target: '_blank', rel: 'noopener' }, '시험 그림 보기')); }
+      catch (e) { igMsg.textContent = '⚠️ ' + e.message; }
+      igTest.disabled = false;
+    } }, '이미지 만들기 시험 (비용이 조금 들어요)');
+    const igCard = h('section', { class: 'card' }, h('h2', null, '이미지 만들기 (Gemini)'),
+      h('div', { class: 'wrap', style: 'max-width:520px' },
+        h('p', { class: 'muted small' }, '위 [AI 연결]에 넣은 Gemini API 키를 그대로 써요. 이미지 생성은 결제가 연결된 키가 필요하고, 한 장마다 요금이 붙어요. 만든 그림은 학생(모둠) 패들렛 방에 새 글로 올라가요. (패들렛 API에는 글 삭제가 없어서 다시 만들면 글이 하나 더 생겨요.)'),
+        h('label', { class: 'field', for: 'igon' }, '학생 화면', igOn),
+        h('label', { class: 'field', for: 'igmax' }, '생성 횟수 제한', igMax),
+        h('label', { class: 'field', for: 'igmodel' }, '이미지 모델 (선택)', igModel),
+        h('div', { class: 'actions' }, igSave, igTest), igMsg));
+
+    body.append(...[h('div', { class: 'two' }, classCard, modeCard), info.settings.aiMode === 'off' ? h('p', { class: 'muted small' }, 'AI 없이 선생님이 직접 판정하는 방식이라 아래 AI 연결과 판정 시험은 사용하지 않아요.') : null, h('div', { class: 'two' }, aiCard, padCard), igCard, groupCard, padletCard, obsCard, tryBox, dataCard].filter(Boolean));
   }
 
   if (T.token) start().then(() => { if (!T.info) renderLogin(); }); else renderLogin();
