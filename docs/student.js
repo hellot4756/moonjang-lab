@@ -525,7 +525,22 @@
       h('div', { class: 'mprog', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(steps.length), 'aria-valuenow': String(doneN) },
         h('div', { class: 'mbar', style: `width:${Math.round(doneN / steps.length * 100)}%` })),
       h('p', { class: 'muted small', style: 'margin:6px 0 10px' }, `${doneN} / ${steps.length} 단계 완료 · 위에서부터 차례대로 하나씩 하면 돼요`),
-      ...(finished && !p2 ? [h('div', { class: 'notice ok' }, h('b', null, '1차시 활동을 마쳤어요! '), '포스터 만들기는 2차시에 해요. 선생님이 2차시를 열면 여기에 나타나요.')] : finished ? [h('div', { class: 'notice ok' }, h('b', null, '모든 단계를 마쳤어요! '), S.group ? '수고했어요. 위의 [모둠 문장 목록으로]를 눌러 다른 문장 포스터도 만들어 보세요.' : '수고했어요. 위 단계를 눌러 다시 볼 수도 있어요.')] : []), list].filter(Boolean));
+      ...(finished && !p2 ? [h('div', { class: 'notice ok' }, h('b', null, '1차시 활동을 마쳤어요! '), '포스터 만들기는 2차시에 해요. 선생님이 2차시를 열면 여기에 나타나요.')] : finished ? [h('div', { class: 'notice ok' }, h('b', null, '모든 단계를 마쳤어요! '), S.group ? '수고했어요. 위의 [모둠 문장 목록으로]를 눌러 다른 문장 포스터도 만들어 보세요.' : '수고했어요. 위 단계를 눌러 다시 볼 수도 있어요.')] : []), list,
+      ...(() => {   // 모둠: 일부 문장만 끝낸 경우, 남은 문장을 만들러 바로 갈 수 있는 버튼
+        if (!S.group) return [];
+        const todo = S.group.slots.filter((x) => x.status === 'todo');
+        const goList = () => { M.pick = -1; save(); render(); const el = document.getElementById('group'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+        if (!todo.length) return [h('div', { class: 'actions', style: 'margin-top:12px' }, h('button', { class: 'btn', type: 'button', onclick: goList }, '↑ 모둠 문장 목록 보기'))];
+        const go = async () => {
+          if (!S.group.isLeader) { goList(); return; }
+          M.pick = -1; save();
+          await startSlot(todo[0].i);
+          const el = document.getElementById('conds'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        };
+        return [h('div', { class: 'notice', style: 'margin-top:12px' }, h('b', null, `아직 만들지 않은 문장이 ${todo.length}개 남았어요. `),
+          h('div', { class: 'actions', style: 'margin-top:8px' }, h('button', { class: 'btn primary big', type: 'button', onclick: go }, S.group.isLeader ? `남은 문장 만들러 가기 (문장 ${todo[0].i + 1}) →` : '모둠 문장 목록으로 ↑'),
+            h('button', { class: 'btn', type: 'button', onclick: goList }, '↑ 모둠 문장 목록 보기')))];
+      })()].filter(Boolean));
     return card;
   }
 
