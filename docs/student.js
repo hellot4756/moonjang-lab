@@ -446,7 +446,7 @@
     const lockedAt = (i) => steps.slice(0, i).some((x) => !x.done) && !(S.group && !lead && (steps[i].id === 'make' || steps[i].id === 'copy'));
 
     const card = h('section', { class: 'card mission', id: 'mission' });
-    const redraw = () => { const n = missionCard(); if (n) card.replaceWith(n); };
+    const redraw = () => { const n = missionCard(); const cur = document.getElementById('mission') || card; if (n && cur) cur.replaceWith(n); };   // 비동기 작업이 끝날 때는 이전 카드가 이미 교체됐으므로 지금 화면에 있는 카드를 찾아 바꾼다
     const go = (id) => { M.view = id; save(); redraw(); const el = document.getElementById('mission'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); };
     const next = () => { M.view = ''; save(); redraw(); const el = document.getElementById('mission'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
 
