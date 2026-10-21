@@ -200,10 +200,27 @@ function needsReview(r) {
   return (r.flagged || r.needsReview) && !r.override && !r.reviewed;
 }
 
-function statsMap(since) {
+// ---------- 활동 회차 ----------
+// 회차가 하나도 저장되지 않은 예전 자료는 '1회차(열림)' 하나로 본다.
+function roundsList() {
+  const r = store.settings.rounds;
+  return Array.isArray(r) && r.length ? r : [{ id: 'r1', no: 1, name: '1회차', openedAt: 0, closedAt: 0, legacy: true }];
+}
+function activeRound() { return roundsList().find((x) => !x.closedAt) || null; }
+function recRound(r) { return r.rd || roundsList()[0].id; }
+function roundPub(x) { return x ? { id: x.id, no: x.no, name: x.name, openedAt: x.openedAt, closedAt: x.closedAt, groupMode: !!x.groupMode } : null; }
+// 교사 화면이 기본으로 보여 줄 회차: 열린 회차, 없으면 가장 최근 회차. 'all' 이면 전체.
+function viewRound(q) {
+  if (q === 'all') return '';
+  if (q && roundsList().some((x) => x.id === q)) return q;
+  const a = activeRound(); if (a) return a.id;
+  const l = roundsList(); return l[l.length - 1].id;
+}
+function statsMap(since, rd) {
   const m = new Map();
   for (const r of store.records) {
     if (r.ts < since) continue;
+    if (rd && recRound(r) !== rd) continue;
     let s = m.get(r.sid);
     if (!s) { s = { tries: 0, correct: 0, incorrect: 0, pending: 0, review: 0, topicTodo: 0, topicOk: 0, topicNo: 0, fb: 0, last: 0 }; m.set(r.sid, s); }
     const v = finalVerdict(r);
@@ -271,11 +288,28 @@ function groupLeader(cls, no) {
 }
 
 // 모둠 하나의 진행(학생 화면·교사 현황판 공통)
-function groupData(cls, no) {
+function groupData(cls, no, rid) {
+  const ar = activeRound();
+  if (rid === undefined) rid = ar ? ar.id : '';
   const out = { no, members: groupMembers(cls, no), slots: [], total: 0, done: 0, pending: 0, tries: 0, wrong: 0, last: 0 };
-  const recs = store.records.filter((r) => r.gk === `${cls}|${no}`);
+  const recs = store.records.filter((r) => r.gk === `${cls}|${no}` && (!rid || recRound(r) === rid));
   out.tries = recs.length; out.wrong = recs.filter((r) => finalVerdict(r) === 'incorrect').length;
   out.last = recs.reduce((m, r) => Math.max(m, r.ts || 0), 0);
+  if (!ar || ar.id !== rid) {   // 닫힌 회차(또는 열린 회차 없음): 그때의 기록으로 문제 목록을 다시 만든다
+    const order = [];
+    for (const r of recs) if (!order.includes(r.cid)) order.push(r.cid);
+    out.slots = order.map((cid, i) => {
+      const mine = recs.filter((r) => r.cid === cid);
+      const okRec = mine.filter((r) => finalVerdict(r) === 'correct').pop() || null;
+      const pend = okRec ? null : mine.filter((r) => finalVerdict(r) === 'pending').pop() || null;
+      const rec = okRec || pend || mine[mine.length - 1];
+      return { i, conds: null, tries: mine.length, status: okRec ? 'done' : pend ? 'pending' : 'todo', id: rec.id, sentence: rec.sentence, by: rec.name, topic: rec.topicLabel, comp: rec.compLabel, struct: rec.structLabel, padletAt: rec.padletAt || 0, poster: rec.poster || null, roomDone: rec.roomDone || 0 };
+    });
+    out.total = out.slots.length;
+    out.done = out.slots.filter((x) => x.status === 'done').length;
+    out.pending = out.slots.filter((x) => x.status === 'pending').length;
+    return out;
+  }
   out.slots = groupSlots(cls, no).map((sl) => {
     const mine = recs.filter((r) => r.cid === sl.n);
     const okRec = mine.filter((r) => finalVerdict(r) === 'correct').pop() || null;
@@ -300,6 +334,7 @@ function groupData(cls, no) {
 function groupView(st) {
   if (!groupOn() || st.demo) return null;
   const no = store.groupOf(st.sid);
+  if (!activeRound()) return { count: store.settings.groupCount || 8, no, members: [], slots: [], total: 0, done: 0, leader: null, isLeader: false, noRound: true };
   const out = { count: store.settings.groupCount || 8, no, members: [], slots: [], total: 0, done: 0, leader: null, isLeader: false };
   if (!no) return out;
   const d = groupData(st.cls, no);
@@ -317,12 +352,12 @@ function requireLeader(st) {
 }
 
 // 교사용 모둠 현황판: 모둠별 진행과 모둠원 상태
-async function gboardData(cls) {
+async function gboardData(cls, rid) {
   const now = Date.now();
   const count = store.settings.groupCount || 8;
   const groups = [];
   for (let no = 1; no <= count; no++) {
-    const d = groupData(cls, no);
+    const d = groupData(cls, no, rid);
     if (!d.members.length) continue;
     const ld = groupLeader(cls, no);
     const members = d.members.map((m) => {
@@ -347,15 +382,19 @@ function padletFor(st) {
   };
 }
 
-function myHistory(sid, limit) {
+function myHistory(st, limit) {
   const out = [];
+  const gk = groupOn() || store.records.some((r) => r.gk) ? groupKey(st) : '';   // 모둠 활동 기록은 모둠원 모두가 볼 수 있다
+  const names = new Map(roundsList().map((x) => [x.id, x.name]));
   for (let i = store.records.length - 1; i >= 0 && out.length < limit; i--) {
     const r = store.records[i];
-    if (r.sid !== sid) continue;
+    if (r.sid !== st.sid && !(gk && r.gk === gk)) continue;
+    const rd = recRound(r);
     out.push({
-      id: r.id, ts: r.ts, attempt: r.attempt, sentence: r.sentence,
-      verdict: finalVerdict(r), flagged: !!r.flagged,
-      topicJudge: r.topicJudge || '', tfeedback: r.tfeedback || '', tfeedbackAt: r.tfeedbackAt || 0, padletAt: r.padletAt || 0,
+      id: r.id, ts: r.ts, attempt: r.attempt, sentence: r.sentence, rd, rdName: names.get(rd) || '',
+      verdict: finalVerdict(r), flagged: !!r.flagged, by: r.gk ? r.name : '', gno: r.gno || 0,
+      tfeedback: r.tfeedback || '', tfeedbackAt: r.tfeedbackAt || 0, padletAt: r.padletAt || 0,
+      poster: r.poster && r.poster.prompt ? { prompt: r.poster.prompt } : null,
       comp: r.compLabel, struct: r.structLabel, topic: r.topicLabel,
     });
   }
@@ -435,6 +474,8 @@ function teacherInfo() {
       claude: { configured: !!cKey, keyHint: maskKey(cKey), model: store.settings.model || process.env.ANTHROPIC_MODEL || DEFAULT_MODEL },
       gemini: { configured: !!gKey, keyHint: maskKey(gKey), model: store.settings.geminiModel || process.env.GEMINI_MODEL || DEFAULT_GEMINI },
     },
+    rounds: roundsList().map((x) => Object.assign(roundPub(x), { level: x.level || '', groupCount: x.groupCount || 0, groupPlan: x.groupPlan || {}, note: x.note || '', tries: store.records.filter((r) => recRound(r) === x.id).length })),
+    activeRound: roundPub(activeRound()),
     settings: {
       level: store.settings.level,
       open: store.settings.open,
@@ -504,8 +545,10 @@ async function boardData(cls, mask) {
       const now = Date.now();
       const lastBy = new Map();
       const tally = new Map();
+      const vr = viewRound('');
       for (let i = store.records.length - 1; i >= 0; i--) {
         const r = store.records[i];
+        if (vr && recRound(r) !== vr) continue;
         if (!lastBy.has(r.sid)) lastBy.set(r.sid, r);
         const t = tally.get(r.sid) || { tries: 0, correct: 0 };
         t.tries++; if (finalVerdict(r) === 'correct') t.correct++;
@@ -577,7 +620,7 @@ async function handleApi(req, res, pathname, query) {
     if (!store.settings.observerPassword) throw new HttpError(401, '참관 계정이 닫혔어요.');
     let cls = query.get('cls') || '';
     if (!cls) cls = (store.students[0] || {}).cls || '';
-    const d = await gboardData(cls);
+    const d = await gboardData(cls, viewRound(''));
     const mask = (n) => (n || '').slice(0, 1) + '○'.repeat(Math.max(0, (n || '').length - 1));
     for (const g of d.groups) {
       for (const m of g.members) { m.name = mask(m.name); m.sid = ''; }
@@ -594,12 +637,14 @@ async function handleApi(req, res, pathname, query) {
 
   if (method === 'GET' && pathname === '/api/me') {
     const st = studentAuth(req);
-    const sm = statsMap(0).get(st.sid) || { tries: 0, correct: 0 };
+    const ar = activeRound();
+    const sm = (ar && statsMap(0, ar.id).get(st.sid)) || { tries: 0, correct: 0 };
     if (st.demo && !store.settings.observerPassword) throw new HttpError(401, '참관 계정이 닫혔어요.');
     return send(res, 200, {
       student: { sid: st.sid, name: st.name, cls: st.cls, no: st.no },
       stats: { tries: sm.tries, correct: sm.correct },
-      history: myHistory(st.sid, 40),
+      history: myHistory(st, 150),
+      round: st.demo ? { id: 'demo', no: 0, name: '체험' } : roundPub(ar),
       open: store.settings.open,
       poster: store.settings.poster !== false,
       topicChoice: store.settings.topicChoice !== false,
@@ -620,6 +665,8 @@ async function handleApi(req, res, pathname, query) {
   if (method === 'POST' && pathname === '/api/challenge') {
     const st = studentAuth(req);
     if (!st.demo && !store.settings.open) throw new HttpError(403, '지금은 수업이 닫혀 있어요.');
+    const ar = st.demo ? null : activeRound();
+    if (!st.demo && !ar) throw new HttpError(403, '지금 열려 있는 회차가 없어요. 선생님이 새 회차를 열면 조건을 받을 수 있어요. 지난 회차는 [내 기록 보기]에서 볼 수 있어요.');
     // 학생별 난이도: 하 → 짜임은 쉬운 것만, 성분 개수는 가장 적게 / 상 → 기본 조건만, 성분 개수는 가장 많게
     const own = st.level === 'easy' || st.level === 'basic' ? st.level : '';
     let ids, cid = '', gk = '';
@@ -634,7 +681,7 @@ async function handleApi(req, res, pathname, query) {
       ids = sl.ids; cid = sl.n;
     } else ids = C.draw(own || store.settings.level, rnd, recentConditions(st.sid), own === 'easy' ? 'min' : own === 'basic' ? 'max' : '');
     const resolved = C.resolve(ids);
-    const token = sign({ r: 'c', sid: st.sid, ids, n: cid || store.newId(), g: gk, exp: Date.now() + 4 * HOUR });
+    const token = sign({ r: 'c', sid: st.sid, ids, n: cid || store.newId(), g: gk, rd: ar ? ar.id : '', exp: Date.now() + 4 * HOUR });
     if (!st.demo) activity.set(st.sid, { typingAt: 0, draftLen: 0, challengeAt: Date.now() });
     const choice = store.settings.topicChoice !== false;
     return send(res, 200, {
@@ -678,6 +725,7 @@ async function handleApi(req, res, pathname, query) {
     const b = await readBody(req, 256);
     const rec = store.getRecord(String(b.id || ''));
     if (!rec || !rec.gk || rec.gk !== groupKey(st)) throw new HttpError(404, '문장을 찾을 수 없어요.');
+    if (!activeRound() || recRound(rec) !== activeRound().id) throw new HttpError(403, '끝난 회차의 내용은 고칠 수 없어요.');
     if (finalVerdict(rec) !== 'correct') throw new HttpError(400, '문법 조건을 통과한 문장만 진행할 수 있어요.');
     store.patchRecord(rec.id, { roomDone: b.undo ? 0 : Date.now() });
     return send(res, 200, { ok: true });
@@ -693,6 +741,7 @@ async function handleApi(req, res, pathname, query) {
     if (rateLimited('padlet:' + st.sid, 6, 60 * 1000)) throw new HttpError(429, '너무 빨리 올리고 있어요. 잠시 뒤에 다시 해 주세요.');
     const rec = store.getRecord(String(b.id || ''));
     if (!rec || (rec.sid !== st.sid && !(rec.gk && rec.gk === groupKey(st)))) throw new HttpError(404, '올릴 문장을 찾지 못했어요.');
+    if (!activeRound() || recRound(rec) !== activeRound().id) throw new HttpError(403, '끝난 회차의 내용은 고칠 수 없어요.');
     if (finalVerdict(rec) !== 'correct') throw new HttpError(400, '문법 조건을 통과한 문장만 올릴 수 있어요.');
     if (rec.gk) requireLeader(st);
     if (rec.padletAt && !b.again) return send(res, 200, { ok: true, already: true, at: rec.padletAt });
@@ -718,6 +767,8 @@ async function handleApi(req, res, pathname, query) {
     const b = await readBody(req, 8192);
     const ch = verify(b.token);
     if (!ch || ch.r !== 'c' || ch.sid !== st.sid) throw new HttpError(410, '조건이 만료되었어요. 새 조건을 받아 주세요.');
+    const ar = st.demo ? null : activeRound();
+    if (!st.demo && (!ar || (ch.rd || roundsList()[0].id) !== ar.id)) throw new HttpError(410, '이 회차는 끝났어요. 지난 회차의 내용은 [내 기록 보기]에서 볼 수 있고, 선생님이 새 회차를 열면 새 조건을 받을 수 있어요.');
     const resolved = C.resolve(ch.ids);
     if (!resolved) throw new HttpError(410, '조건을 찾을 수 없어요. 새 조건을 받아 주세요.');
 
@@ -729,7 +780,7 @@ async function handleApi(req, res, pathname, query) {
     if (rateLimited('submit:' + (st.demo ? 'demo:' + ip : st.sid), st.demo ? 20 : 12, 60 * 1000)) throw new HttpError(429, '너무 빨리 제출하고 있어요. 잠시 뒤에 다시 제출해 주세요.');
     if (ch.g && ch.g !== groupKey(st)) throw new HttpError(410, '모둠이 바뀌었어요. 모둠 화면에서 다시 시작해 주세요.');
     if (ch.g) requireLeader(st);
-    const attempt = st.demo ? (demoTries.set(ch.n, (demoTries.get(ch.n) || 0) + 1), demoTries.get(ch.n)) : store.records.filter((r) => r.cid === ch.n && (ch.g || r.sid === st.sid)).length + 1;
+    const attempt = st.demo ? (demoTries.set(ch.n, (demoTries.get(ch.n) || 0) + 1), demoTries.get(ch.n)) : store.records.filter((r) => r.cid === ch.n && (ch.g || r.sid === st.sid) && (!ar || recRound(r) === ar.id)).length + 1;
     if (attempt > 25) throw new HttpError(429, '이 조건으로는 충분히 도전했어요. 새 조건을 받아 주세요.');
 
     // 학생이 목록에서 고른 주제(선생님이 허용한 경우). 주제는 채점하지 않고 기록과 예시 문장에만 쓴다.
@@ -744,7 +795,7 @@ async function handleApi(req, res, pathname, query) {
     if (manual) { fields.pendingReason = ''; fields.manual = true; }
     { const a = activity.get(st.sid); if (a) { a.typingAt = 0; a.draftLen = 0; } }
     const rec = st.demo ? { id: 'demo-' + ch.n + '-' + attempt } : store.addRecord(Object.assign({
-      ts: Date.now(), sid: st.sid, name: st.name, cls: st.cls, cid: ch.n, attempt,
+      ts: Date.now(), sid: st.sid, name: st.name, cls: st.cls, cid: ch.n, attempt, rd: ar.id,
       comp: ch.ids.comp, struct: ch.ids.struct, topic: ch.ids.topic,
       compLabel: resolved.comp.label, structLabel: resolved.struct.label, topicLabel, topicCustom,
       sentence, flagged: false,
@@ -772,6 +823,7 @@ async function handleApi(req, res, pathname, query) {
     const st = studentAuth(req);
     if (st.demo) return send(res, 200, { id: 'demo' });
     if (store.settings.poster === false) throw new HttpError(403, '지금은 포스터 프롬프트 만들기가 닫혀 있어요.');
+    if (!activeRound()) throw new HttpError(403, '지금 열려 있는 회차가 없어요. 지난 회차의 내용은 고칠 수 없어요.');
     if (rateLimited('poster:' + st.sid, 20, 60 * 1000)) throw new HttpError(429, '너무 빨리 만들고 있어요. 잠시 뒤에 다시 해 주세요.');
     const b = await readBody(req, 32 * 1024);
     const prompt = String(b.prompt || '').trim().slice(0, 4000);
@@ -784,6 +836,7 @@ async function handleApi(req, res, pathname, query) {
       requireLeader(st);
       const rec = store.getRecord(String(b.recId));
       if (!rec || !rec.gk || rec.gk !== groupKey(st)) throw new HttpError(404, '문장을 찾을 수 없어요.');
+      if (!activeRound() || recRound(rec) !== activeRound().id) throw new HttpError(403, '끝난 회차의 내용은 고칠 수 없어요.');
       if (finalVerdict(rec) !== 'correct') throw new HttpError(400, '문법 조건을 통과한 문장만 포스터를 만들 수 있어요.');
       store.patchRecord(rec.id, { poster: { opts, prompt, promptEn: String(b.promptEn || '').trim().slice(0, 4000), by: st.name, at: Date.now() }, roomDone: 0 });
     }
@@ -819,6 +872,35 @@ async function handleApi(req, res, pathname, query) {
     teacherAuth(req);
 
     if (method === 'GET' && pathname === '/api/teacher/info') return send(res, 200, teacherInfo());
+
+    // 회차 열기: 열려 있는 회차가 없을 때만. 지금 설정(난이도·모둠 활동·모둠 문장 수·조건)이 이 회차의 조건이 된다.
+    if (method === 'POST' && pathname === '/api/teacher/round/open') {
+      const b = await readBody(req, 1024);
+      if (activeRound()) throw new HttpError(400, '열려 있는 회차가 있어요. 먼저 그 회차를 닫아 주세요.');
+      const list = roundsList().slice();
+      const no = list.reduce((m, x) => Math.max(m, x.no || 0), 0) + 1;
+      const s = store.settings;
+      const round = { id: 'r' + no, no, name: clip(b.name, 40) || `${no}회차`, openedAt: Date.now(), closedAt: 0, level: s.level, groupMode: s.groupMode === true, groupCount: s.groupCount || 8, groupPlan: s.groupPlan || {}, note: clip(b.note, 200) };
+      list.push(round);
+      store.updateSettings({ rounds: list, open: true, groupSeed: (Number(s.groupSeed) || 1) + 1 });   // 새 회차는 모둠도 새 조건을 받는다
+      grader.cache.clear();
+      return send(res, 200, teacherInfo());
+    }
+    if (method === 'POST' && pathname === '/api/teacher/round/close') {
+      const ar = activeRound();
+      if (!ar) throw new HttpError(400, '열려 있는 회차가 없어요.');
+      const list = roundsList().map((x) => (x.id === ar.id ? Object.assign({}, x, { closedAt: Date.now() }) : x));
+      store.updateSettings({ rounds: list });
+      return send(res, 200, teacherInfo());
+    }
+    if (method === 'POST' && pathname === '/api/teacher/round/rename') {
+      const b = await readBody(req, 512);
+      const name = clip(b.name, 40);
+      if (!name) throw new HttpError(400, '회차 이름을 입력해 주세요.');
+      if (!roundsList().some((x) => x.id === b.id)) throw new HttpError(404, '회차를 찾을 수 없어요.');
+      store.updateSettings({ rounds: roundsList().map((x) => (x.id === b.id ? Object.assign({}, x, { name }) : x)) });
+      return send(res, 200, teacherInfo());
+    }
 
     if (method === 'PUT' && pathname === '/api/teacher/settings') {
       const b = await readBody(req, 4096);
@@ -890,7 +972,7 @@ async function handleApi(req, res, pathname, query) {
     if (method === 'GET' && pathname === '/api/teacher/gboard') {
       const cls = query.get('cls') || '';
       if (!cls) throw new HttpError(400, '반을 선택해 주세요.');
-      return send(res, 200, await gboardData(cls));
+      return send(res, 200, Object.assign(await gboardData(cls, viewRound(query.get('rd') || '')), { rd: viewRound(query.get('rd') || ''), rounds: roundsList().map(roundPub) }));
     }
     if (method === 'POST' && pathname === '/api/teacher/group/clear') {
       const b = await readBody(req, 512);
@@ -1057,7 +1139,8 @@ async function handleApi(req, res, pathname, query) {
     if (method === 'GET' && pathname === '/api/teacher/overview') {
       const since = periodStart(query.get('period') || 'all');
       const cls = query.get('cls') || '';
-      const sm = statsMap(since);
+      const rdv = viewRound(query.get('rd') || '');
+      const sm = statsMap(since, rdv);
       const now = Date.now();
       const classes = {};
       const students = [];
@@ -1071,7 +1154,7 @@ async function handleApi(req, res, pathname, query) {
       return send(res, 200, {
         students,
         classes: Object.keys(classes).sort((a, b) => a.localeCompare(b, 'ko', { numeric: true })).map((c) => ({ cls: c, count: classes[c] })),
-        reviewOpen: open,
+        reviewOpen: open, rd: rdv, rounds: roundsList().map(roundPub),
         topicOpen: store.records.filter((r) => topicTodo(r)).length,
         online: students.filter((s) => s.online).length,
       });
@@ -1085,6 +1168,7 @@ async function handleApi(req, res, pathname, query) {
       const topicF = query.get('topic') || '';
       const fbF = query.get('fb') || '';
       const gnoF = parseInt(query.get('gno'), 10) || 0;
+      const rdF = viewRound(query.get('rd') || '');
       const before = parseInt(query.get('before'), 10) || Infinity;
       const limit = Math.min(parseInt(query.get('limit'), 10) || 100, 500);
       const out = [];
@@ -1094,6 +1178,7 @@ async function handleApi(req, res, pathname, query) {
         if (cls && r.cls !== cls) continue;
         if (sid && r.sid !== sid) continue;
         if (gnoF && r.gno !== gnoF) continue;
+        if (rdF && recRound(r) !== rdF) continue;
         const v = finalVerdict(r);
         if (verdict === 'review') { if (!needsReview(r)) continue; }
         else if (verdict && v !== verdict) continue;
@@ -1230,14 +1315,16 @@ async function handleApi(req, res, pathname, query) {
     if (method === 'GET' && pathname === '/api/teacher/export/records.csv') {
       const since = periodStart(query.get('period') || 'all');
       const cls = query.get('cls') || '';
-      const rows = [['일시', '반', '학번', '이름', '문장 성분 조건', '문장의 짜임 조건', '공익광고 주제', '회차', '제출 문장', '최종 판정', 'AI 판정', '교사 수정', '학생 확인 요청', 'AI 피드백 요약', '주제 판단(교사)', '교사 피드백']];
+      const rdq = query.get('rd') || '';
+      const rname = new Map(roundsList().map((x) => [x.id, x.name]));
+      const rows = [['활동 회차', '일시', '반', '학번', '이름', '모둠', '문장 성분 조건', '문장의 짜임 조건', '공익광고 주제', '시도 횟수', '제출 문장', '최종 판정', 'AI 판정', '교사 수정', '학생 확인 요청', 'AI 피드백 요약', '교사 피드백']];
       const label = { correct: '정답', incorrect: '오답', pending: '판정 대기' };
       for (const r of store.records) {
-        if (r.ts < since || (cls && r.cls !== cls)) continue;
+        if (r.ts < since || (cls && r.cls !== cls) || (rdq && recRound(r) !== rdq)) continue;
         const fb = r.checks ? Object.values(r.checks).filter((c) => !c.ok).map((c) => c.reason).join(' / ') : (r.pendingReason || '');
-        rows.push([fmtTime(r.ts), r.cls, r.sid, r.name, r.compLabel, r.structLabel, r.topicLabel, r.attempt, r.sentence,
+        rows.push([rname.get(recRound(r)) || '', fmtTime(r.ts), r.cls, r.sid, r.name, r.gno || '', r.compLabel, r.structLabel, r.topicLabel, r.attempt, r.sentence,
           label[finalVerdict(r)] || '', (r.manual ? 'AI 미사용' : label[r.verdict]) || '', r.override ? (label[r.override.verdict] + (r.override.note ? ': ' + r.override.note : '')) : '',
-          r.flagged ? '예' : '', fb, ({ ok: '적절', no: '부적절' })[r.topicJudge] || '미확인', r.tfeedback || '']);
+          r.flagged ? '예' : '', fb, r.tfeedback || '']);
       }
       return sendFile(res, 200, '제출기록.csv', toCsv(rows), 'text/csv; charset=utf-8');
     }
@@ -1245,12 +1332,12 @@ async function handleApi(req, res, pathname, query) {
     if (method === 'GET' && pathname === '/api/teacher/export/summary.csv') {
       const since = periodStart(query.get('period') || 'all');
       const cls = query.get('cls') || '';
-      const sm = statsMap(since);
-      const rows = [['반', '학번', '이름', '제출 수', '문법 정답 수', '문법 오답 수', '판정 대기', '정답률(%)', '주제 적절', '주제 부적절', '주제 미확인(문법 정답 중)', '교사 피드백 수', '마지막 제출']];
+      const sm = statsMap(since, query.get('rd') || '');
+      const rows = [['반', '학번', '이름', '제출 수', '문법 정답 수', '문법 오답 수', '판정 대기', '정답률(%)', '교사 피드백 수', '마지막 제출']];
       for (const s of store.students) {
         if (cls && s.cls !== cls) continue;
         const t = sm.get(s.sid) || { tries: 0, correct: 0, incorrect: 0, pending: 0, topicTodo: 0, topicOk: 0, topicNo: 0, fb: 0, last: 0 };
-        rows.push([s.cls, s.sid, s.name, t.tries, t.correct, t.incorrect, t.pending, t.tries ? Math.round((t.correct / t.tries) * 100) : '', t.topicOk, t.topicNo, t.topicTodo, t.fb, fmtTime(t.last)]);
+        rows.push([s.cls, s.sid, s.name, t.tries, t.correct, t.incorrect, t.pending, t.tries ? Math.round((t.correct / t.tries) * 100) : '', t.fb, fmtTime(t.last)]);
       }
       return sendFile(res, 200, '학생별누적.csv', toCsv(rows), 'text/csv; charset=utf-8');
     }

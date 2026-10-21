@@ -116,8 +116,11 @@
   async function enter() {
     try {
       const me = await api('/api/me');
-      S.demo = !!me.demo; S.student = me.student; S.stats = me.stats; S.history = me.history; S.posterOn = !!me.poster; S.padletTemplate = me.padletTemplate || ''; S.padlet = me.padlet || { post: false, link: '' };
+      S.demo = !!me.demo; S.round = me.round || null; S.student = me.student; S.stats = me.stats; S.history = me.history; S.posterOn = !!me.poster; S.padletTemplate = me.padletTemplate || ''; S.padlet = me.padlet || { post: false, link: '' };
       S.group = me.group || null;
+      const rid = S.round ? S.round.id : '';   // 저장해 둔 조건·결과가 지난 회차 것이면 버린다
+      if (S.challenge && (S.challenge.rdId || '') !== rid) S.challenge = null;
+      if (S.last) { const h0 = S.history.find((x) => x.id === S.last.id); if (h0 && h0.rd !== rid) { S.last = null; S.mission = null; } }
       if (S.group && S.challenge && S.challenge.slot === undefined) S.challenge = null;   // 모둠 활동에서는 모둠 문제만 쓴다
       if (!S.group && S.challenge && S.challenge.slot !== undefined) S.challenge = null;
       if (S.group && !S.group.isLeader) S.challenge = null;
@@ -126,7 +129,8 @@
         else if (Array.isArray(me.topicList) && me.topicList.length) { S.challenge.topicChoice = true; S.challenge.topicList = me.topicList; }
       }
     } catch (e) { render(); return; }
-    if (!S.challenge && !S.group) await newChallenge(false);
+    if (!S.round && !S.demo) { S.challenge = null; S.last = null; S.mission = null; }
+    if (!S.challenge && !S.group && (S.round || S.demo)) await newChallenge(false);
     save();
     render();
   }
@@ -134,6 +138,7 @@
   async function newChallenge(rerender) {
     try {
       const c = await api('/api/challenge', {});
+      c.rdId = S.round ? S.round.id : '';
       S.challenge = c; S.attempts = 0; S.last = null; S.draft = ''; S.topicText = ''; S.flagged = false; S.notice = '';
     } catch (e) {
       S.notice = e.message;
@@ -153,6 +158,9 @@
     return G.slots.filter((x) => x.status === 'done').map((x) => ({ id: x.id, slot: x.i, sentence: x.sentence, topic: x.topic || '', comp: x.comp || '', struct: x.struct || '', verdict: x.status === 'done' ? 'correct' : 'pending', padletAt: x.padletAt || 0 }));
   }
 
+  // 지금 열려 있는 회차의 기록인지(지난 회차의 문장은 보기만 하고 이어서 할 수 없다)
+  function inRound(it) { return S.demo || (!!S.round && it.rd === S.round.id); }
+
   function posterSentences() {
     if (S.group) return groupSentences();
     const seen = new Set(), out = [];
@@ -162,7 +170,7 @@
       seen.add(key); out.push({ id, sentence, topic: topic || '', verdict });
     };
     if (S.last && S.last.sentence && S.last.verdict === 'correct' && S.challenge) add(S.last.id, S.last.sentence, S.last.topic || S.challenge.conditions.topic.label, S.last.verdict);
-    for (const it of S.history) if (it.verdict === 'correct') add(it.id, it.sentence, it.topic, it.verdict);
+    for (const it of S.history) if (it.verdict === 'correct' && inRound(it)) add(it.id, it.sentence, it.topic, it.verdict);
     return out;
   }
 
@@ -297,7 +305,7 @@
       const c = S.challenge.conditions;
       add(S.last.id, S.last.sentence, S.last.topic || c.topic.label, c.comp.label, c.struct.label, S.last.verdict);
     }
-    for (const it of S.history) if (it.verdict === 'correct') add(it.id, it.sentence, it.topic, it.comp, it.struct, it.verdict);
+    for (const it of S.history) if (it.verdict === 'correct' && inRound(it)) add(it.id, it.sentence, it.topic, it.comp, it.struct, it.verdict);
     return out;
   }
 
@@ -525,7 +533,7 @@
     S.busy = true; render();
     try {
       const c = await api('/api/challenge', { slot: i });
-      c.slot = i;
+      c.slot = i; c.rdId = S.round ? S.round.id : '';
       S.challenge = c; S.attempts = 0; S.last = null; S.draft = ''; S.topicText = ''; S.flagged = false; S.notice = '';
     } catch (e) { S.notice = e.message; }
     S.busy = false; save(); render();
@@ -773,19 +781,27 @@
   function histCard() {
     const list = h('div', { class: 'hist' });
     if (!S.history.length) list.append(h('p', { class: 'muted' }, '아직 제출한 문장이 없어요.'));
+    let lastRd = null;
     for (const it of S.history) {
+      if (it.rd !== lastRd) {   // 회차별로 묶어서 보여 준다 (최근 회차가 위)
+        lastRd = it.rd;
+        const cur = !!S.round && it.rd === S.round.id;
+        list.append(h('h3', { class: 'rdhead' }, it.rdName || '회차', cur ? h('span', { class: 'pill ok' }, '진행 중') : h('span', { class: 'pill gray' }, '끝난 회차 · 보기만 가능')));
+      }
       const v = VERDICT[it.verdict] || ['', 'gray'];
       list.append(h('div', { class: 'it' },
         h('div', { class: 'meta' }, h('span', { class: 'pill ' + v[1] }, v[0]),
           new Date(it.ts).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
-          it.comp + ' · ' + it.struct + ' · ' + it.topic),
+          (it.gno ? `${it.gno}모둠${it.by ? ' · ' + it.by + ' 입력' : ''} · ` : '') + it.comp + ' · ' + it.struct + ' · ' + it.topic),
         h('div', { class: 's' }, it.sentence),
+        it.poster ? h('details', { class: 'block' }, h('summary', null, '포스터 프롬프트 보기'), h('div', { style: 'white-space:pre-wrap;margin-top:6px' }, it.poster.prompt)) : null,
         it.tfeedback ? h('div', { class: 'block tfb' }, h('div', { class: 'ttl' }, '선생님 피드백'), h('div', { style: 'white-space:pre-wrap' }, it.tfeedback)) : null));
     }
     const rate = S.stats.tries ? Math.round((S.stats.correct / S.stats.tries) * 100) : 0;
     return h('section', { class: 'card' },
       h('h2', null, '내 기록'),
-      h('p', { class: 'muted', style: 'margin-bottom:10px' }, `지금까지 ${S.stats.tries}번 제출했고 문법 조건을 ${S.stats.correct}번 맞혔어요. (정답률 ${rate}%)`),
+      S.round ? h('p', { class: 'muted', style: 'margin-bottom:10px' }, `이번 회차(${S.round.name})에 ${S.stats.tries}번 제출했고 문법 조건을 ${S.stats.correct}번 맞혔어요. (정답률 ${rate}%)`) : null,
+      h('p', { class: 'muted small', style: 'margin-bottom:10px' }, '끝난 회차의 기록은 볼 수만 있고 고칠 수 없어요.'),
       list);
   }
 
@@ -808,6 +824,12 @@
       h('div', { class: 'brand' }, h('span', { class: 'stampbox sm' }, '제2막'), '문장 연습실', h('small', null, `문법광인의 서재 · 누적 ${S.stats.correct}/${S.stats.tries}`)),
       h('div', { class: 'chip' }, `${st.cls} ${st.name}`, h('button', { class: 'btn sm', type: 'button', onclick: () => { if (S.demo) { logout(false); location.href = 'observer.html'; } else logout(false); } }, S.demo ? '참관 화면으로' : '나가기')));
 
+    if (!S.round && !S.demo) {   // 열린 회차가 없으면 지난 기록만 볼 수 있다
+      const nr = [top, h('section', { class: 'card' }, h('h2', null, '지금은 열려 있는 회차가 없어요'),
+        h('p', null, '선생님이 새 회차를 열면 새로운 조건을 받을 수 있어요. 지난 회차의 문장과 선생님 피드백은 아래에서 볼 수 있어요.')),
+      histCard()];
+      app.replaceChildren(...nr); return;
+    }
     if (S.group && !S.group.no) return renderGroupPick(top);
     const nodes = [top];
     if (S.demo) nodes.push(h('div', { class: 'notice ok', role: 'note' }, h('b', null, '참관 체험 중이에요. '), '여기서 제출한 문장과 기록은 저장되지 않고, 실제 수업(교사 화면·현황판·패들렛)에는 아무 영향이 없어요.'));
@@ -852,6 +874,10 @@
     try {
       const me = await api('/api/me');
       if (!!me.group !== !!S.group && !(document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName))) { await enter(); return; }   // 선생님이 개인/모둠 활동을 바꾼 경우
+      if ((me.round ? me.round.id : '') !== (S.round ? S.round.id : '') && !(document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName) && S.draft)) {   // 선생님이 회차를 열거나 닫은 경우
+        S.challenge = null; S.last = null; S.mission = null; S.draft = ''; S.notice = ''; save();
+        await enter(); return;
+      }
       const prevCount = S.history.filter((x) => x.tfeedback).length;
       S.history = me.history; S.stats = me.stats; S.padletTemplate = me.padletTemplate || ''; S.padlet = me.padlet || { post: false, link: '' };
       // 선생님이 '주제 바꾸기'를 켜거나 끄면 이미 받은 조건 화면에도 바로 반영한다(켠 경우에는 주제 목록도 함께 받는다)

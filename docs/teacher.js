@@ -21,7 +21,7 @@
 
   const T = {
     token: '', info: null, tab: 'status', cls: '', period: 'all', verdict: '', auto: true,
-    timer: null, boardF: '', seatEdit: false, conds: null, drawer: null, dirty: false, topicF: '', fbF: '', fbDirty: false, gnoF: '',
+    timer: null, boardF: '', seatEdit: false, conds: null, drawer: null, dirty: false, topicF: '', rd: '', fbF: '', fbDirty: false, gnoF: '', rd: '',
   };
   try { T.token = sessionStorage.getItem(KEY) || ''; } catch (e) { /* 무시 */ }
   // 새로고침해도 보던 탭과 반 선택을 그대로 유지한다
@@ -148,6 +148,14 @@
     for (const c of (T.classes || [])) sel.append(h('option', { value: c.cls }, `${c.cls} (${c.count}명)`));
     sel.value = T.cls;
     sel.addEventListener('change', () => { T.cls = sel.value; saveView(); onchange(); });
+    return sel;
+  }
+  function roundSelect(onchange) {
+    const sel = h('select', { 'aria-label': '회차 선택' }, h('option', { value: '' }, '현재(최근) 회차'));
+    for (const r of [...((T.info && T.info.rounds) || [])].reverse()) sel.append(h('option', { value: r.id }, r.name + (r.closedAt ? '' : ' (진행 중)')));
+    sel.append(h('option', { value: 'all' }, '전체 회차'));
+    sel.value = T.rd || '';
+    sel.addEventListener('change', () => { T.rd = sel.value; onchange(); });
     return sel;
   }
   function periodSelect(onchange) {
@@ -316,6 +324,27 @@
     } else {
       urlBox.append(h('div', { class: 'notice warn' }, '네트워크 주소를 찾지 못했어요. 컴퓨터가 와이파이에 연결되어 있는지 확인해 주세요.'));
     }
+    // ----- 활동 회차 -----
+    const rcard = h('div', { class: 'card' }, h('h2', null, '활동 회차'));
+    const ar = info.activeRound;
+    const rmsg = h('div', { class: 'notice', role: 'status', hidden: true });
+    const roundCall = async (path, body) => {
+      try { T.info = await api('/api/teacher/round/' + path, body || {}); renderShell(); } catch (e) { rmsg.hidden = false; rmsg.className = 'notice bad'; rmsg.textContent = e.message; }
+    };
+    if (ar) {
+      rcard.append(h('div', { class: 'toolbar' }, h('span', { class: 'pill ok' }, `${ar.name} 진행 중`),
+        h('button', { class: 'btn', type: 'button', onclick: () => { if (confirm(`'${ar.name}'을(를) 닫을까요?\n닫으면 학생들은 이 회차의 문장·포스터·패들렛 올리기를 더 이상 고칠 수 없고, [내 기록 보기]에서 읽기만 할 수 있어요.`)) roundCall('close'); } }, '이 회차 닫기')),
+        h('p', { class: 'muted small', style: 'margin-top:8px' }, '회차를 닫은 뒤 [조건 설정]·[모둠 활동]에서 다음 회차의 조건을 바꾸고 새 회차를 열면, 학생들이 새 조건을 받아요.'));
+    } else {
+      const nm = h('input', { type: 'text', maxlength: '40', placeholder: `회차 이름 (비우면 ${((info.rounds || []).reduce((m, x) => Math.max(m, x.no), 0)) + 1}회차)`, 'aria-label': '새 회차 이름' });
+      const cnt = info.settings.groupMode ? '모둠 활동' : '개인 활동';
+      rcard.append(h('div', { class: 'notice warn' }, '지금 열려 있는 회차가 없어요. 학생들은 새 조건을 받을 수 없고 지난 기록만 볼 수 있어요.'),
+        h('div', { class: 'toolbar', style: 'margin-top:8px' }, nm, h('button', { class: 'btn primary', type: 'button', onclick: () => roundCall('open', { name: nm.value }) }, '새 회차 열기')),
+        h('p', { class: 'muted small', style: 'margin-top:8px' }, `열면 지금의 설정(${cnt}, 조건 목록, 모둠 문장 수)이 이 회차의 조건이 돼요. 먼저 [조건 설정]·[모둠 활동]에서 조건을 정해 두세요.`));
+    }
+    const past = (info.rounds || []).filter((x) => x.closedAt);
+    if (past.length) rcard.append(h('div', { class: 'small', style: 'margin-top:10px' }, h('b', null, '지난 회차  '), ...past.reverse().map((x) => h('span', { class: 'pill gray', style: 'margin:2px 4px 2px 0' }, `${x.name} · ${x.tries}건${x.groupMode ? ' · 모둠' : ''}`))));
+    rcard.append(rmsg);
     const state = h('div', { class: 'card' }, h('h2', null, '수업 상태'));
     const openBtn = h('button', { class: 'btn ' + (info.settings.open ? '' : 'primary'), type: 'button' }, info.settings.open ? '학생 입장 닫기' : '학생 입장 열기');
     openBtn.addEventListener('click', async () => {
@@ -335,15 +364,15 @@
 
     const load = async () => {
       try {
-        const o = await api('/api/teacher/overview?' + qs({ cls: T.cls, period: T.period }));
+        const o = await api('/api/teacher/overview?' + qs({ cls: T.cls, period: T.period, rd: T.rd }));
         T.classes = o.classes; T.overview = o;
         renderStatusData(statsBox, data, o);
       } catch (e) { data.replaceChildren(h('div', { class: 'notice bad', style: 'margin:14px' }, e.message)); }
     };
-    const tb = h('div', { class: 'toolbar' }, classSelect(load), periodSelect(load), autoBox(load), h('span', { class: 'spacer' }),
-      h('button', { class: 'btn sm', type: 'button', onclick: () => download('/api/teacher/export/summary.csv?' + qs({ cls: T.cls, period: T.period }), '학생별누적.csv') }, '학생별 누적 CSV'),
-      h('button', { class: 'btn sm', type: 'button', onclick: () => download('/api/teacher/export/records.csv?' + qs({ cls: T.cls, period: T.period }), '제출기록.csv') }, '제출 기록 CSV'));
-    body.append(h('div', { class: 'two' }, urlBox, state), statsBox, tb, data);
+    const tb = h('div', { class: 'toolbar' }, classSelect(load), roundSelect(load), periodSelect(load), autoBox(load), h('span', { class: 'spacer' }),
+      h('button', { class: 'btn sm', type: 'button', onclick: () => download('/api/teacher/export/summary.csv?' + qs({ cls: T.cls, period: T.period, rd: T.rd === 'all' ? '' : (T.rd || (T.info.activeRound ? T.info.activeRound.id : '')) }), '학생별누적.csv') }, '학생별 누적 CSV'),
+      h('button', { class: 'btn sm', type: 'button', onclick: () => download('/api/teacher/export/records.csv?' + qs({ cls: T.cls, period: T.period, rd: T.rd === 'all' ? '' : (T.rd || (T.info.activeRound ? T.info.activeRound.id : '')) }), '제출기록.csv') }, '제출 기록 CSV'));
+    body.append(h('div', { class: 'two' }, urlBox, state), rcard, statsBox, tb, data);
     load().then(() => { tb.replaceChild(classSelect(load), tb.firstChild); });
     autoRefresh(load);
   }
@@ -478,7 +507,7 @@
         else { box.replaceChildren(h('div', { class: 'card muted' }, '위에서 반을 먼저 골라 주세요.')); return; }
       }
       try {
-        const o = await api('/api/teacher/gboard?' + qs({ cls: T.cls }));
+        const o = await api('/api/teacher/gboard?' + qs({ cls: T.cls, rd: T.rd }));
         const cnt = { done: 0, doing: 0, idle: 0 };
         for (const g of o.groups) cnt[g.state]++;
         const online = o.groups.reduce((n, g) => n + g.members.filter((m) => m.online).length, 0);
@@ -504,7 +533,7 @@
         box.replaceChildren(...(cards.length ? [h('div', { class: 'gbgrid' }, cards)] : [h('div', { class: 'card muted' }, '이 반에는 아직 모둠을 고른 학생이 없어요.')]));
       } catch (e) { box.replaceChildren(h('div', { class: 'notice bad' }, e.message)); }
     };
-    const tb = h('div', { class: 'toolbar' }, classSelect(() => load()), sum);
+    const tb = h('div', { class: 'toolbar' }, classSelect(() => load()), roundSelect(() => load()), sum);
     body.append(tb, box);
     api('/api/teacher/overview').then((o) => { T.classes = o.classes; if (!T.cls && o.classes[0]) T.cls = o.classes[0].cls; tb.replaceChild(classSelect(() => load()), tb.firstChild); load(); }).catch(() => {});
     clearInterval(T.timer);
@@ -531,7 +560,7 @@
     const load = async (append) => {
       try {
         const before = append && recs.length ? recs[recs.length - 1].ts : '';
-        const o = await api('/api/teacher/records?' + qs({ cls: T.cls, period: T.period, verdict: T.verdict, limit: 50, before, fb: T.fbF, gno: T.gnoF }));
+        const o = await api('/api/teacher/records?' + qs({ cls: T.cls, period: T.period, verdict: T.verdict, limit: 50, before, fb: T.fbF, gno: T.gnoF, rd: T.rd }));
         recs = append ? recs.concat(o.records) : o.records;
         more = o.records.length === 50;
         draw();
@@ -570,7 +599,7 @@
       if (!confirm(`정말 ${T.cls} 전체를 지울까요? 한 번 더 확인해요.`)) return;
       try { const o = await api('/api/teacher/class/reset', { cls: T.cls }); toast(`${T.cls}: ${o.deleted}건을 지웠어요.`); load(); } catch (e) { toast(e.message, true); }
     } }, '이 반 기록 모두 지우기');
-    const tb = h('div', { class: 'toolbar' }, classSelect(() => load()), vsel, fsel, (T.info && T.info.settings && T.info.settings.groupMode) ? gsel : null, periodSelect(() => load()), autoBox(() => load()), h('span', { class: 'spacer' }), regradeAll, delShown, delClass);
+    const tb = h('div', { class: 'toolbar' }, classSelect(() => load()), roundSelect(() => load()), vsel, fsel, (T.info && T.info.settings && T.info.settings.groupMode) ? gsel : null, periodSelect(() => load()), autoBox(() => load()), h('span', { class: 'spacer' }), regradeAll, delShown, delClass);
     body.append(tb, list, moreBtn);
     api('/api/teacher/overview').then((o) => { T.classes = o.classes; tb.replaceChild(classSelect(() => load()), tb.firstChild); }).catch(() => {});
     load();
@@ -597,7 +626,7 @@
       for (const r of recs) list.append(recCard(r, (upd) => { if (upd) { recs[recs.indexOf(r)] = upd; draw(); } else load(); }));
     };
     const load = async () => {
-      try { recs = (await api('/api/teacher/records?' + qs({ sid: s.sid, limit: 200, period: T.period }))).records; draw(); } catch (e) { list.replaceChildren(h('div', { class: 'notice bad' }, e.message)); }
+      try { recs = (await api('/api/teacher/records?' + qs({ sid: s.sid, limit: 200, period: T.period, rd: 'all' }))).records; draw(); } catch (e) { list.replaceChildren(h('div', { class: 'notice bad' }, e.message)); }
     };
     load();
   }

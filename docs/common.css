@@ -542,3 +542,6 @@ body.is-gate { background: linear-gradient(180deg, #18232e 0%, #223445 60%, #162
 .dot.typing { background: var(--accent); box-shadow: 0 0 0 3px rgba(40,116,207,.25); }
 .gbslot { padding: 6px 0; border-top: 1px dashed var(--line); }
 .gbslot.done b { color: #1f7a5a; }
+.hist .rdhead { display: flex; gap: 8px; align-items: center; margin: 14px 0 4px; font-size: 1rem; }
+.hist .rdhead:first-child { margin-top: 0; }
+.rdbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
