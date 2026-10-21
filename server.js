@@ -499,6 +499,7 @@ function teacherInfo() {
       topicChoice: store.settings.topicChoice !== false,
       groupMode: groupOn(), groupCount: store.settings.groupCount || 8, groupPlan: store.settings.groupPlan || {},
       observerPassword: store.settings.observerPassword || '',
+      observerClasses: store.settings.observerClasses || [],
       padletTemplate: store.settings.padletTemplate || '',
       padlet: {
         keySet: !!store.settings.padletApiKey, keyHint: maskKey(store.settings.padletApiKey || ''), lastError: padletLastError,
@@ -553,7 +554,16 @@ function resultFields(out) {
 }
 
 // 교실 현황판 자료. mask 가 true 이면(참관자) 이름은 성만 남기고, 학생이 쓴 문장은 빼고 준다.
+// 참관 교사에게 보여 줄 반: 교사가 고른 반(지금 명단에 있는 반만). 비어 있으면 null = 모든 반.
+function obsAllowed() {
+  const sel = store.settings.observerClasses || [];
+  if (!sel.length) return null;
+  const have = new Set(store.students.map((s) => s.cls));
+  const ok = sel.filter((c) => have.has(c));
+  return ok.length ? ok : ['\u0000'];   // 고른 반이 모두 명단에서 사라졌다면 아무 반도 보이지 않게
+}
 async function boardData(cls, mask) {
+      const allow = mask ? obsAllowed() : null;
       const now = Date.now();
       const lastBy = new Map();
       const tally = new Map();
@@ -569,6 +579,7 @@ async function boardData(cls, mask) {
       const classes = {};
       const students = [];
       for (const s of store.students) {
+        if (allow && !allow.includes(s.cls)) continue;
         classes[s.cls] = (classes[s.cls] || 0) + 1;
         if (cls && s.cls !== cls) continue;
         const online = (presence.get(s.sid) || 0) > now - 5 * 60 * 1000;
@@ -631,6 +642,8 @@ async function handleApi(req, res, pathname, query) {
     observerAuth(req);
     if (!store.settings.observerPassword) throw new HttpError(401, '참관 계정이 닫혔어요.');
     let cls = query.get('cls') || '';
+    const allow = obsAllowed();
+    if (allow && !allow.includes(cls)) cls = allow[0];
     if (!cls) cls = (store.students[0] || {}).cls || '';
     const d = await gboardData(cls, viewRound(''));
     const mask = (n) => (n || '').slice(0, 1) + '○'.repeat(Math.max(0, (n || '').length - 1));
@@ -957,6 +970,7 @@ async function handleApi(req, res, pathname, query) {
       if (b.groupReseed) patch.groupSeed = (Number(store.settings.groupSeed) || 1) + 1;
       if (typeof b.padletTemplate === 'string') patch.padletTemplate = b.padletTemplate;
       if (typeof b.observerPassword === 'string') patch.observerPassword = b.observerPassword;
+      if (Array.isArray(b.observerClasses)) patch.observerClasses = b.observerClasses;
       if (typeof b.apiKey === 'string' && b.apiKey.trim()) patch.apiKey = b.apiKey;
       if (b.clearApiKey) patch.apiKey = '';
       if (typeof b.model === 'string') patch.model = b.model;
