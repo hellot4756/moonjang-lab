@@ -24,6 +24,15 @@
     timer: null, boardF: '', seatEdit: false, conds: null, drawer: null, dirty: false, topicF: '', fbF: '', fbDirty: false,
   };
   try { T.token = sessionStorage.getItem(KEY) || ''; } catch (e) { /* 무시 */ }
+  // 새로고침해도 보던 탭과 반 선택을 그대로 유지한다
+  const VKEY = 'moonjang.teacher.view.v1';
+  const TAB_IDS = ['status', 'board', 'records', 'roster', 'conds', 'posters', 'settings'];
+  try {
+    const v = JSON.parse(sessionStorage.getItem(VKEY) || 'null');
+    if (v && TAB_IDS.includes(v.tab)) T.tab = v.tab;
+    if (v && typeof v.cls === 'string') T.cls = v.cls;
+  } catch (e) { /* 무시 */ }
+  function saveView() { try { sessionStorage.setItem(VKEY, JSON.stringify({ tab: T.tab, cls: T.cls })); } catch (e) { /* 무시 */ } }
 
   async function api(path, body, method) {
     const opt = { method: method || (body === undefined ? 'GET' : 'POST'), headers: { 'content-type': 'application/json' } };
@@ -57,7 +66,7 @@
   }
 
   function logout() {
-    try { sessionStorage.removeItem(KEY); } catch (e) { /* 무시 */ }
+    try { sessionStorage.removeItem(KEY); sessionStorage.removeItem(VKEY); } catch (e) { /* 무시 */ }
     T.token = ''; clearInterval(T.timer); renderLogin();
   }
 
@@ -98,6 +107,7 @@
   }
 
   function renderShell() {
+    saveView();
     const top = h('div', { class: 'top' },
       h('div', { class: 'brand' }, h('span', { class: 'stampbox sm' }, '제2막'), '문장 연습실', h('small', null, '문법광인의 서재 · 교사 화면')),
       h('button', { class: 'btn sm', type: 'button', onclick: logout }, '로그아웃'));
@@ -134,7 +144,7 @@
     const sel = h('select', { 'aria-label': '반 선택' }, h('option', { value: '' }, '전체 반'));
     for (const c of (T.classes || [])) sel.append(h('option', { value: c.cls }, `${c.cls} (${c.count}명)`));
     sel.value = T.cls;
-    sel.addEventListener('change', () => { T.cls = sel.value; onchange(); });
+    sel.addEventListener('change', () => { T.cls = sel.value; saveView(); onchange(); });
     return sel;
   }
   function periodSelect(onchange) {
