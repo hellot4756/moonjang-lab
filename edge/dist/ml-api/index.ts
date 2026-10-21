@@ -773,6 +773,9 @@ class Grader {
         if (badKey) return { ok: false, code: 'auth', message: `${who} API 키가 올바르지 않거나 권한이 없어요.` };
         if (res.status === 404) return { ok: false, code: 'model', message: `모델 이름을 확인해 주세요. (${msg})` };
         if (gem && res.status === 400 && /think/i.test(msg) && !this.noThinkOff) { this.noThinkOff = true; i--; continue; }   // 이 모델은 생각 끄기를 받지 않으면 빼고 다시
+        if (/credit balance|insufficient|billing|quota|exceeded your|resource_exhausted/i.test(msg) && (res.status === 400 || res.status === 402 || res.status === 429)) {
+          if (res.status !== 429 || /credit|billing|quota|exhausted/i.test(msg)) return { ok: false, code: 'quota', message: `${who} 사용 한도(크레딧)가 부족해요. (${msg.slice(0, 120)})` };
+        }
         if (res.status === 400) return { ok: false, code: 'request', message: `요청이 거절되었어요. (${msg})` };
       } catch (e) {
         lastErr = { status: 0, message: e.name === 'AbortError' ? '응답 시간이 너무 길어요.' : String(e.message || e) };
@@ -784,11 +787,17 @@ class Grader {
   }
   async callWithFallback(system, userMsg, maxTokens) {
     const fb = this.getFallback();
+    const pv = this.getConfig().provider;
+    if (fb && this.skip && this.skip[pv] > Date.now()) {
+      const direct = await this.callApi(system, userMsg, maxTokens, fb, 0);
+      if (direct.ok) { this.lastFallback = { at: Date.now(), from: pv, reason: this.skipReason || '' }; return direct; }
+    }
     const first = await this.callApi(system, userMsg, maxTokens, null, fb ? 15000 : 0);
     if (first.ok || !fb || first.code === 'request') return first;
-    console.log('[AI 예비 전환]', this.getConfig().provider, '->', fb.provider, first.code, first.message);
+    console.log('[AI 예비 전환]', pv, '->', fb.provider, first.code, first.message);
+    if (first.code === 'quota' || first.code === 'auth') { this.skip = Object.assign(this.skip || {}, { [pv]: Date.now() + 10 * 60 * 1000 }); this.skipReason = first.message; }
     const second = await this.callApi(system, userMsg, maxTokens, fb, 0);
-    if (second.ok) { this.lastFallbackAt = Date.now(); return second; }
+    if (second.ok) { this.lastFallbackAt = Date.now(); this.lastFallback = { at: Date.now(), from: pv, reason: first.message }; return second; }
     return first;   // 둘 다 안 되면 주 AI 쪽 오류를 보여 준다
   }
   async grade(r, sentence) {
@@ -1531,6 +1540,7 @@ function teacherInfo() {
     ai: {
       provider: cfg.provider,
       fallback: (aiFallback() || {}).provider || '',
+      fallbackNote: grader.lastFallback && Date.now() - grader.lastFallback.at < 30 * 60 * 1000 ? `최근 ${Math.round((Date.now() - grader.lastFallback.at) / 60000)}분 전에 예비 AI로 판정했어요. (${String(grader.lastFallback.reason).slice(0, 100)})` : '',
       configured: !!cfg.apiKey,
       model: cfg.model,
       keyHint: maskKey(cfg.apiKey),

@@ -310,6 +310,7 @@ function teacherInfo() {
     ai: {
       provider: cfg.provider,
       fallback: (aiFallback() || {}).provider || '',
+      fallbackNote: grader.lastFallback && Date.now() - grader.lastFallback.at < 30 * 60 * 1000 ? `최근 ${Math.round((Date.now() - grader.lastFallback.at) / 60000)}분 전에 예비 AI로 판정했어요. (${String(grader.lastFallback.reason).slice(0, 100)})` : '',
       configured: !!cfg.apiKey,
       model: cfg.model,
       keyHint: maskKey(cfg.apiKey),
