@@ -2332,6 +2332,7 @@ async function handleApi(req, res, pathname, query) {
       if (!rec || !rec.gk || rec.gk !== groupKey(st)) throw new HttpError(404, '문장을 찾을 수 없어요.');
       if (!activeRound() || recRound(rec) !== activeRound().id) throw new HttpError(403, '끝난 회차의 내용은 고칠 수 없어요.');
       if (finalVerdict(rec) !== 'correct') throw new HttpError(400, '문법 조건을 통과한 문장만 포스터를 만들 수 있어요.');
+      if (store.settings.imageGen && (rec.imgN || 0) >= (store.settings.imageMax || 2)) throw new HttpError(403, '이미지 만들기 횟수를 모두 써서 프롬프트를 새로 만들 수 없어요.');
       store.patchRecord(rec.id, { poster: { opts, prompt, promptEn: String(b.promptEn || '').trim().slice(0, 4000), by: st.name, at: Date.now() }, roomDone: 0 });
     }
     const p = store.addPoster({

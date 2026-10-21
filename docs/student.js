@@ -259,16 +259,17 @@
       basics,
       formOnly ? h('details', { class: 'pmore' }, h('summary', null, '더 자세히 꾸미고 싶다면 (선택)'), more) : more));
 
-    const make = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
+    const locked = !!box._locked;   // 이미지 만들기 횟수를 모두 썼으면 프롬프트를 볼 수만 있다
+    const make = h('button', { class: 'btn primary', type: 'button', disabled: locked || null, onclick: async () => {
       F.colorCustom = (F.colorCustom || '').trim();
       PS.out = { ko: P.build(F, 'ko'), en: P.build(F, 'en') };
       PS.lang = PS.lang || 'ko'; box._made = true;
       save(); redo();
       const o = document.getElementById('pp-out'); if (o) o.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       try { await api('/api/poster', { prompt: PS.out.ko, promptEn: PS.out.en, topic: F.topic, sentence: F.sentence, opts: F, recId: box._recId || undefined }); } catch (e) { /* 저장하지 못해도 프롬프트는 쓸 수 있다 */ }
-    } }, formOnly ? '프롬프트 만들기 →' : '프롬프트 만들기');
+    } }, locked ? '이미지 횟수를 모두 써서 만들 수 없어요' : formOnly ? '프롬프트 만들기 →' : '프롬프트 만들기');
     kids.push(ro ? h('div', { class: 'notice' }, '포스터 선택과 [프롬프트 만들기]는 모둠장이 해요. 모둠장이 만들면 선택한 내용이 여기에 나타나요.') : h('div', { class: 'actions' }, make,
-      h('button', { class: 'btn', type: 'button', onclick: () => { Object.assign(F, P.defaults(), { topic: F.topic, sentence: F.sentence }); PS.out = null; save(); redo(); } }, '선택 처음으로')));
+      locked ? null : h('button', { class: 'btn', type: 'button', onclick: () => { Object.assign(F, P.defaults(), { topic: F.topic, sentence: F.sentence }); PS.out = null; save(); redo(); } }, '선택 처음으로')));
 
     if (PS.out && !formOnly) {
       const lang = PS.lang === 'en' ? 'en' : 'ko';
@@ -477,6 +478,7 @@
         box._formOnly = true;
         if (!lead) { box._readOnly = true; Object.assign(PS.form, P.defaults(), (slot && slot.poster && slot.poster.opts) || {}, { sentence: item.sentence, topic: (slot && slot.poster && slot.poster.opts && slot.poster.opts.topic) || item.topic || PS.form.topic }); }
         if (S.group && lead) box._recId = item.id;
+        box._locked = !!(imgMode && !S.demo && Math.max(item.imgN || 0, (IMGS[String(item.id)] || {}).n || 0) >= (S.imageMax || 2));
         box._redraw = () => { if (box._made && PS.out) { M.copied = false; M.view = ''; save(); redraw(); const el = document.getElementById('mission'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } else drawPoster(box); };
         drawPoster(box);
         return [h('p', { class: 'mhelp' }, lead ? '이미지를 만들어 주는 AI에게 줄 "그림 주문서(프롬프트)"를 만들어요. 내 문장은 포스터에 그대로 들어가요.' : (outP ? '모둠장이 고른 내용으로 프롬프트를 만들었어요.' : '모둠장이 고르는 중이에요. 같이 의논해 보세요. 모둠장이 [프롬프트 만들기]를 누르면 이 화면에 나타나요.')), box];
