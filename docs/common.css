@@ -495,3 +495,26 @@ body.is-gate { background: linear-gradient(180deg, #18232e 0%, #223445 60%, #162
 .gate-leaf.right input[type=text], .gate-leaf.right input[type=password], .gate-leaf.right input[type=number] { color: #16263f; font-weight: 600; caret-color: #16263f; }
 .gate-leaf.right input::placeholder { color: #6a7a90; opacity: 1; font-weight: 400; }
 .btn.small { padding: 5px 12px; min-height: 0; font-size: .84rem; }
+
+/* ---- 성공 뒤 단계별 미션 안내 ---- */
+.mission h2 { margin-bottom: 6px; }
+.mprog { height: 10px; border-radius: 6px; background: var(--line); overflow: hidden; }
+.mbar { height: 100%; background: var(--ok); transition: width .3s; }
+.msteps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.mstep { border: 1px solid var(--line); border-radius: 8px; background: #fff; overflow: hidden; }
+.mstep.open { border-color: var(--gold, #a67c2e); box-shadow: 0 0 0 2px rgba(166,124,46,.18); }
+.mstep.done { background: var(--ok-soft); }
+.mhead { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 14px; background: none; border: 0; text-align: left; font: inherit; cursor: pointer; min-height: 52px; }
+.mnum { flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--navy, #16222e); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; }
+.mnum.done { background: var(--ok); }
+.mtitle { flex: 1; font-weight: 700; font-size: 1.02rem; }
+.mtag { flex: none; font-size: .8rem; padding: 2px 8px; border-radius: 10px; background: var(--surface-2); color: var(--muted); }
+.mtag.now { background: var(--gold, #a67c2e); color: #fff; }
+.mbody { padding: 4px 14px 16px; }
+.mhelp { margin: 4px 0 10px; color: var(--muted); }
+.msent { padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: #fffef8; font-family: var(--serif); font-size: 1.1rem; }
+.btn.big { min-height: 56px; font-size: 1.1rem; padding: 0 22px; }
+.mguide { margin: 14px 0; padding-left: 1.4em; display: grid; gap: 8px; font-size: 1.02rem; line-height: 1.55; }
+.mguide li::marker { font-weight: 800; color: var(--gold, #a67c2e); }
+.pmore { margin-top: 10px; border: 1px dashed var(--line); border-radius: 8px; padding: 8px 12px; }
+.pmore summary { cursor: pointer; font-weight: 700; padding: 6px 0; }
