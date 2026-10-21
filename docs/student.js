@@ -175,7 +175,7 @@
   function groupSentences() {
     const G = S.group;
     if (!G || !G.slots) return [];
-    return G.slots.filter((x) => x.status === 'done').map((x) => ({ id: x.id, slot: x.i, sentence: x.sentence, topic: x.topic || '', comp: x.comp || '', struct: x.struct || '', verdict: x.status === 'done' ? 'correct' : 'pending', padletAt: x.padletAt || 0 }));
+    return G.slots.filter((x) => x.status === 'done').map((x) => ({ id: x.id, slot: x.i, sentence: x.sentence, topic: x.topic || '', comp: x.comp || '', struct: x.struct || '', verdict: x.status === 'done' ? 'correct' : 'pending', padletAt: x.padletAt || 0, imgN: x.imgN || 0, posterImg: x.posterImg || null }));
   }
 
   // 지금 열려 있는 회차의 기록인지(지난 회차의 문장은 보기만 하고 이어서 할 수 없다)
@@ -532,16 +532,35 @@
           const make = async () => {
             if (S.demo) { IM.msg = '체험 모드에서는 이미지를 만들지 않아요.'; redraw(); return; }
             IM.busy = 'make'; IM.msg = ''; IM.warn = ''; IM.posted = false; redraw();
+            const t0 = Date.now(); let settled = false;
+            const pull = async () => {   // 서버는 끝냈는데 응답이 안 돌아온 경우를 위해, 서버에 저장된 상태를 직접 읽는다
+              const me = await api('/api/me'); S.history = me.history;
+              if (me.group) S.group = me.group;
+              const r = S.group ? ((S.group.slots || []).find((x) => x.id === item.id) || {}) : ((S.history || []).find((x) => x.id === item.id) || {});
+              if (r.imgN) IM.n = Math.max(IM.n, r.imgN);
+              if (r.posterImg && r.posterImg.at >= t0 - 5000) { IM.url = r.posterImg.url; IM.at = r.posterImg.at; IM.posted = !!r.posterImg.posted; return true; }
+              return false;
+            };
+            const watcher = (async () => {
+              await new Promise((r) => setTimeout(r, 35000));
+              while (!settled && Date.now() - t0 < 120000) { try { if (await pull()) return true; } catch (e) { /* 다시 */ } await new Promise((r) => setTimeout(r, 4000)); }
+              return false;
+            })();
+            let ok = false;
             try {
-              const o = await api('/api/poster/image', { id: item.id, prompt: PS.out.en || PS.out.ko });
-              IM.n = Math.max(IM.n + 1, mx - o.left); IM.url = o.url; IM.at = Date.now();
+              const o = await Promise.race([
+                api('/api/poster/image', { id: item.id, prompt: PS.out.en || PS.out.ko }).then((x) => ({ x }), (e) => ({ e })),
+                watcher.then((f) => (f ? { found: true } : new Promise(() => {}))),
+              ]);
+              if (o.e) throw o.e;
+              if (o.x) { IM.n = Math.max(IM.n + 1, mx - o.x.left); IM.url = o.x.url; IM.at = Date.now(); }
+              ok = true;
             } catch (e) {
               IM.warn = e.message;
-              try { const me = await api('/api/me'); S.history = me.history; const r = (S.history || []).find((x) => x.id === item.id); if (r) { IM.n = Math.max(IM.n, r.imgN || 0); if (r.posterImg) { IM.url = r.posterImg.url; IM.at = r.posterImg.at; IM.posted = !!r.posterImg.posted; } } } catch (e2) { /* 그대로 둔다 */ }
-              IM.busy = ''; redraw(); return;
+              try { await pull(); } catch (e2) { /* 그대로 둔다 */ }
             }
-            IM.busy = ''; redraw();
-            await postIt();
+            settled = true; IM.busy = ''; redraw();
+            if (ok && IM.url && !IM.posted) await postIt();
           };
           const busy = !!IM.busy;
           const needPost = IM.url && !IM.posted;
