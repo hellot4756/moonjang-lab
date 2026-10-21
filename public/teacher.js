@@ -532,16 +532,17 @@
             h('div', { class: 'gbmem' }, g.members.map((m) => h('div', { class: 'gbm' + (m.online ? ' on' : '') },
               h('i', { class: 'dot' + (m.typing ? ' typing' : m.online ? ' on' : '') }), h('span', null, m.name), m.leader ? h('span', { class: 'pill gray' }, '모둠장') : null,
               m.typing ? h('span', { class: 'muted small' }, `입력 중 ${m.draftLen}자`) : null))),
-            h('details', { class: 'small' }, h('summary', null, '문장 보기'),
+            h('details', { class: 'small' }, h('summary', null, '문장·아이디어 보기' + (g.slots.some((x) => (x.notes || []).length) ? ` (연습장 ${g.slots.reduce((n, x) => n + (x.notes || []).length, 0)}개)` : '')),
               g.slots.map((x) => h('div', { class: 'gbslot ' + x.status },
                 h('b', null, `문장 ${x.i + 1}`), ' ', h('span', { class: 'muted' }, `${x.struct || ''} · ${x.topic || ''}`),
-                x.status === 'todo' ? h('div', { class: 'muted' }, x.tries ? `아직 (도전 ${x.tries}번)` : '아직') : h('div', { style: 'font-family:var(--serif)' }, x.sentence, h('span', { class: 'muted small' }, `  — ${x.by}`), x.status === 'pending' ? h('span', { class: 'pill warn' }, '확인 중') : null, x.padletAt ? h('span', { class: 'pill gray' }, '패들렛 올림') : null)))),
+                x.status === 'todo' ? h('div', { class: 'muted' }, x.tries ? `아직 (도전 ${x.tries}번)` : '아직') : h('div', { style: 'font-family:var(--serif)' }, x.sentence, h('span', { class: 'muted small' }, `  — ${x.by}`), x.status === 'pending' ? h('span', { class: 'pill warn' }, '확인 중') : null, x.padletAt ? h('span', { class: 'pill gray' }, '패들렛 올림') : null),
+                (x.notes || []).length ? h('div', { class: 'gbnotes small', style: 'order:9;margin-top:4px;padding-left:8px;border-left:3px solid var(--line)' }, h('b', null, '아이디어 연습장'), ...x.notes.map((n) => h('div', null, h('b', null, n.name), ' ', n.text, h('span', { class: 'muted' }, '  ' + new Date(n.ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }))))) : null))),
             h('div', { class: 'toolbar' }, h('button', { class: 'btn sm', type: 'button', onclick: () => { T.gnoF = String(g.no); T.tab = 'records'; renderShell(); } }, '이 모둠 제출 보기')));
         });
         box.replaceChildren(...(cards.length ? [h('div', { class: 'gbgrid' }, cards)] : [h('div', { class: 'card muted' }, '이 반에는 아직 모둠을 고른 학생이 없어요.')]));
       } catch (e) { box.replaceChildren(h('div', { class: 'notice bad' }, e.message)); }
     };
-    const tb = h('div', { class: 'toolbar' }, classSelect(() => load()), roundSelect(() => load()), sum);
+    const tb = h('div', { class: 'toolbar' }, classSelect(() => load()), roundSelect(() => load()), sum, h('span', { class: 'spacer' }), h('button', { class: 'btn sm', type: 'button', onclick: () => download('/api/teacher/export/notes.csv?' + qs({ cls: T.cls }), '모둠아이디어연습장.csv') }, '아이디어 연습장 CSV'));
     body.append(tb, box);
     api('/api/teacher/overview').then((o) => { T.classes = o.classes; if (!T.cls && o.classes[0]) T.cls = o.classes[0].cls; tb.replaceChild(classSelect(() => load()), tb.firstChild); load(); }).catch(() => {});
     clearInterval(T.timer);

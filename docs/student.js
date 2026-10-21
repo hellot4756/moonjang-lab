@@ -568,6 +568,34 @@
     try { const r = await api('/api/group'); S.group = r.group; } catch (e) { /* 다음 번에 */ }
   }
 
+  // 아이디어 연습장: 모둠원 누구나 적고 함께 본다. 제출이 아니고, 한 번 적으면 지울 수 없다.
+  const NOTE_DRAFT = {}, NOTE_OPEN = {};
+  function noteBox(sl) {
+    const notes = sl.notes || [];
+    const ta = h('textarea', { rows: '2', maxlength: '300', placeholder: '이 조건으로 쓸 수 있는 문장 아이디어를 적어 보세요. (제출되지 않아요)', 'aria-label': `문장 ${sl.i + 1} 아이디어 적기` });
+    ta.value = NOTE_DRAFT[sl.i] || '';
+    ta.addEventListener('input', () => { NOTE_DRAFT[sl.i] = ta.value; });
+    const msg = h('div', { class: 'notice bad', role: 'alert', hidden: true });
+    const btn = h('button', { class: 'btn sm primary', type: 'button' }, '연습장에 적기');
+    btn.addEventListener('click', async () => {
+      const text = ta.value.trim();
+      if (!text) return;
+      btn.disabled = true; msg.hidden = true;
+      try {
+        const r = await api('/api/group/note', { slot: sl.i, text });
+        S.group = r.group; NOTE_DRAFT[sl.i] = ''; NOTE_OPEN[sl.i] = true; gSig = '';
+        const el = document.getElementById('group'); if (el) el.replaceWith(groupCard());
+      } catch (e) { msg.hidden = false; msg.textContent = e.message; btn.disabled = false; }
+    });
+    const me = S.student && S.student.sid;
+    const det = h('details', { class: 'gnote', open: !!NOTE_OPEN[sl.i] || null },
+      h('summary', null, `아이디어 연습장${notes.length ? ` (${notes.length})` : ''}`),
+      notes.length ? h('ul', { class: 'gnotes' }, notes.map((n) => h('li', null, h('b', null, n.name + (n.sid === me ? '(나)' : '')), ' ', h('span', { style: 'white-space:pre-wrap' }, n.text)))) : h('p', { class: 'muted small' }, '아직 적은 아이디어가 없어요.'),
+      ta, h('div', { class: 'actions' }, btn, h('span', { class: 'muted small' }, '모둠원 모두 볼 수 있고, 한 번 적으면 지울 수 없어요. 선생님도 볼 수 있어요.')), msg);
+    det.addEventListener('toggle', () => { NOTE_OPEN[sl.i] = det.open; });
+    return det;
+  }
+
   function groupCard() {
     const G = S.group;
     const card = h('section', { class: 'card', id: 'group' });
@@ -586,6 +614,7 @@
       list.append(h('li', { class: 'gslot ' + sl.status + (cur ? ' cur' : '') },
         h('div', { class: 'ghead' }, h('b', null, `문장 ${sl.i + 1}`), h('span', { class: 'pill ' + st[1] }, st[0]), cur ? h('span', { class: 'pill gray' }, '지금 쓰는 중') : null),
         c ? h('div', { class: 'gconds small' }, h('span', null, c.comp.label), ' · ', h('span', null, c.struct.label), ' · ', h('span', null, '주제: ' + c.topic.label)) : null,
+        noteBox(sl),
         sl.status === 'todo' && !G.isLeader ? h('div', { class: 'muted small' }, sl.tries ? `모둠이 ${sl.tries}번 도전했어요 · 모둠장이 입력하는 중이에요` : '모둠장이 입력할 차례를 기다려요') : sl.status === 'todo' ? h('div', { class: 'actions' }, h('button', { class: 'btn' + (cur ? '' : ' primary'), type: 'button', disabled: S.busy || cur, onclick: () => startSlot(sl.i) }, cur ? '아래에서 쓰는 중' : (sl.tries ? '이어서 도전하기' : '이 문장 쓰기 →')),
           sl.tries ? h('span', { class: 'muted small' }, `모둠이 ${sl.tries}번 도전했어요`) : null) : h('div', null,
           h('div', { class: 'msent' }, sl.sentence), h('div', { class: 'muted small' }, `제출: ${sl.by}`),
@@ -618,8 +647,9 @@
     await refreshGroup();
     if (!S.group) { render(); return; }
     if (S.group.no && !S.group.isLeader && S.challenge) { S.challenge = null; S.last = null; S.draft = ''; save(); gSig = ''; render(); }
-    const sig = JSON.stringify([S.group.no, S.group.isLeader, S.group.members, S.group.slots.map((x) => [x.status, x.sentence, x.padletAt, x.tries, x.poster && x.poster.at, x.roomDone])]);
+    const sig = JSON.stringify([S.group.no, S.group.isLeader, S.group.members, S.group.slots.map((x) => [x.status, x.sentence, x.padletAt, x.tries, x.poster && x.poster.at, x.roomDone, (x.notes || []).length])]);
     if (sig === gSig) return;
+    { const ae = document.activeElement, g0 = document.getElementById('group'); if (ae && ae.tagName === 'TEXTAREA' && g0 && g0.contains(ae)) return; }   // 연습장에 적는 중이면 다음에 갱신
     gSig = sig;
     const el = document.getElementById('group');
     if (S.group.no && !S.group.isLeader && S.mission && S.mission.pick >= 0) { const mc = document.getElementById('mission'); const n = missionCard(); if (mc && n) mc.replaceWith(n); }   // 모둠원 화면은 모둠장의 진행을 따라간다

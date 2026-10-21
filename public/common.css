@@ -545,3 +545,8 @@ body.is-gate { background: linear-gradient(180deg, #18232e 0%, #223445 60%, #162
 .hist .rdhead { display: flex; gap: 8px; align-items: center; margin: 14px 0 4px; font-size: 1rem; }
 .hist .rdhead:first-child { margin-top: 0; }
 .rdbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.gnote { margin-top: 6px; font-size: .9rem; }
+.gnote summary { cursor: pointer; color: var(--muted); }
+.gnote textarea { width: 100%; margin-top: 6px; }
+.gnotes { list-style: none; padding: 0; margin: 6px 0; display: grid; gap: 4px; }
+.gnotes li { padding: 4px 8px; border-left: 3px solid var(--line); overflow-wrap: anywhere; }

@@ -293,6 +293,11 @@ function groupLeader(cls, no) {
   return ms.find((x) => x.sid === sid) || ms[0];
 }
 
+// 모둠 아이디어 연습장: 한 번 적으면 고치거나 지울 수 없다. 모둠원 누구나 적을 수 있고 모둠원이 함께 본다.
+function notesOf(gk, cid) {
+  return store.notes.filter((n) => n.gk === gk && n.cid === cid).map((n) => ({ id: n.id, ts: n.ts, sid: n.sid, name: n.name, text: n.text }));
+}
+
 // 모둠 하나의 진행(학생 화면·교사 현황판 공통)
 function groupData(cls, no, rid) {
   const ar = activeRound();
@@ -309,7 +314,7 @@ function groupData(cls, no, rid) {
       const okRec = mine.filter((r) => finalVerdict(r) === 'correct').pop() || null;
       const pend = okRec ? null : mine.filter((r) => finalVerdict(r) === 'pending').pop() || null;
       const rec = okRec || pend || mine[mine.length - 1];
-      return { i, conds: null, tries: mine.length, status: okRec ? 'done' : pend ? 'pending' : 'todo', id: rec.id, sentence: rec.sentence, by: rec.name, topic: rec.topicLabel, comp: rec.compLabel, struct: rec.structLabel, padletAt: rec.padletAt || 0, poster: rec.poster || null, roomDone: rec.roomDone || 0 };
+      return { i, conds: null, tries: mine.length, status: okRec ? 'done' : pend ? 'pending' : 'todo', id: rec.id, sentence: rec.sentence, by: rec.name, topic: rec.topicLabel, comp: rec.compLabel, struct: rec.structLabel, padletAt: rec.padletAt || 0, poster: rec.poster || null, roomDone: rec.roomDone || 0, notes: notesOf(`${cls}|${no}`, cid) };
     });
     out.total = out.slots.length;
     out.done = out.slots.filter((x) => x.status === 'done').length;
@@ -329,6 +334,7 @@ function groupData(cls, no, rid) {
       id: rec ? rec.id : '', sentence: rec ? rec.sentence : '', by: rec ? rec.name : '', topic: rec ? rec.topicLabel : (view ? view.topic.label : ''),
       comp: res ? res.comp.label : '', struct: res ? res.struct.label : '', padletAt: rec ? rec.padletAt || 0 : 0,
       poster: rec && rec.poster ? rec.poster : null, roomDone: rec ? rec.roomDone || 0 : 0,
+      notes: notesOf(`${cls}|${no}`, sl.n),
     };
   });
   out.total = out.slots.length;
@@ -373,7 +379,7 @@ async function gboardData(cls, rid) {
       return { sid: m.sid, name: m.name, no: m.no, online, typing, draftLen: typing ? a.draftLen : 0, leader: !!ld && ld.sid === m.sid };
     });
     const state = d.total && d.done === d.total ? 'done' : (d.tries || d.done || d.pending) ? 'doing' : 'idle';
-    groups.push({ no, state, total: d.total, done: d.done, pending: d.pending, tries: d.tries, wrong: d.wrong, last: d.last, members, slots: d.slots.map((x) => ({ i: x.i, status: x.status, sentence: x.sentence, by: x.by, comp: x.comp, struct: x.struct, topic: x.topic, tries: x.tries, id: x.id, padletAt: x.padletAt })) });
+    groups.push({ no, state, total: d.total, done: d.done, pending: d.pending, tries: d.tries, wrong: d.wrong, last: d.last, members, slots: d.slots.map((x) => ({ i: x.i, status: x.status, sentence: x.sentence, by: x.by, comp: x.comp, struct: x.struct, topic: x.topic, tries: x.tries, id: x.id, padletAt: x.padletAt, notes: x.notes || [] })) });
   }
   const unassigned = store.students.filter((x) => x.cls === cls && !store.groupOf(x.sid)).map((x) => ({ name: x.name, no: x.no, online: (presence.get(x.sid) || 0) > now - 5 * 60 * 1000 }));
   return { cls, groups, unassigned, count, planTotal: Object.values(store.settings.groupPlan || {}).reduce((a, b) => a + b, 0) };
@@ -630,7 +636,7 @@ async function handleApi(req, res, pathname, query) {
     const mask = (n) => (n || '').slice(0, 1) + '○'.repeat(Math.max(0, (n || '').length - 1));
     for (const g of d.groups) {
       for (const m of g.members) { m.name = mask(m.name); m.sid = ''; }
-      for (const x of g.slots) { x.sentence = ''; x.by = ''; x.id = ''; }
+      for (const x of g.slots) { x.sentence = ''; x.by = ''; x.id = ''; x.noteN = (x.notes || []).length; x.notes = []; }
     }
     d.unassigned = d.unassigned.map((x) => ({ name: mask(x.name), no: x.no, online: x.online }));
     return send(res, 200, d);
@@ -720,6 +726,24 @@ async function handleApi(req, res, pathname, query) {
     if (!(no >= 1 && no <= (store.settings.groupCount || 8))) throw new HttpError(400, '모둠 번호를 다시 골라 주세요.');
     if (store.groupOf(st.sid)) throw new HttpError(400, '이미 모둠이 정해졌어요. 바꾸려면 선생님께 말씀드려 주세요.');
     store.setGroup(st.sid, no);
+    return send(res, 200, { group: groupView(st) });
+  }
+
+  // 아이디어 연습장에 한 줄 덧붙이기(제출이 아니다). 모둠원 누구나 가능, 지우거나 고칠 수 없다.
+  if (method === 'POST' && pathname === '/api/group/note') {
+    const st = studentAuth(req);
+    if (st.demo || !groupOn()) throw new HttpError(400, '지금은 모둠 활동이 아니에요.');
+    const ar = activeRound();
+    if (!ar) throw new HttpError(403, '지금 열려 있는 회차가 없어요. 지난 회차의 연습장은 고칠 수 없어요.');
+    if (rateLimited('gnote:' + st.sid, 12, 60 * 1000)) throw new HttpError(429, '너무 빨리 적고 있어요. 잠시 뒤에 다시 해 주세요.');
+    const b = await readBody(req, 2048);
+    const no = store.groupOf(st.sid);
+    if (!no) throw new HttpError(400, '먼저 모둠을 골라 주세요.');
+    const text = String(b.text || '').replace(/\r/g, '').trim().slice(0, 300);
+    if (!text) throw new HttpError(400, '적을 내용을 입력해 주세요.');
+    const sl = groupSlots(st.cls, no)[parseInt(b.slot, 10)];
+    if (!sl) throw new HttpError(400, '모둠 문제를 찾을 수 없어요. 화면을 새로고침해 주세요.');
+    store.addNote({ ts: Date.now(), rd: ar.id, gk: groupKey(st), gno: no, cid: sl.n, slot: sl.i, sid: st.sid, name: st.name, cls: st.cls, text });
     return send(res, 200, { group: groupView(st) });
   }
 
@@ -1343,6 +1367,17 @@ async function handleApi(req, res, pathname, query) {
           r.flagged ? '예' : '', fb, r.tfeedback || '']);
       }
       return sendFile(res, 200, '제출기록.csv', toCsv(rows), 'text/csv; charset=utf-8');
+    }
+
+    if (method === 'GET' && pathname === '/api/teacher/export/notes.csv') {
+      const cls = query.get('cls') || '';
+      const rname = new Map(roundsList().map((x) => [x.id, x.name]));
+      const rows = [['활동 회차', '반', '모둠', '문장 번호', '작성자', '학번', '작성 시각', '아이디어']];
+      for (const n of store.notes) {
+        if (cls && n.cls !== cls) continue;
+        rows.push([rname.get(n.rd) || '', n.cls, n.gno, (n.slot || 0) + 1, n.name, n.sid, fmtTime(n.ts), n.text]);
+      }
+      return sendFile(res, 200, '모둠아이디어연습장.csv', toCsv(rows), 'text/csv; charset=utf-8');
     }
 
     if (method === 'GET' && pathname === '/api/teacher/export/summary.csv') {

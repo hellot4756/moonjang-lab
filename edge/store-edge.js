@@ -67,6 +67,12 @@ class DbStore extends Store {
     const key = 'gl:' + Buffer.from(gk, 'utf8').toString('hex');
     if (sid) { this.leaders[gk] = sid; this.putKv(key, { sid }); } else { delete this.leaders[gk]; this.delKv(key); }
   }
+  addNote(n) {
+    n.id = this.newId();
+    this.notes.push(n);
+    this.putKv('gn:' + n.id, n);
+    return n;
+  }
   setPadletErr(t) { this.padletErr = t || ''; this.putKv('padlet_err', { t: this.padletErr }); }
 
   applyKv(key, val) {
@@ -77,6 +83,7 @@ class DbStore extends Store {
     else if (key === 'secret') { if (val && val.s) this.secret = val.s; }
     else if (key.startsWith('gm:')) { const sid = key.slice(3); if (val && val.no) this.groups[sid] = Number(val.no); else delete this.groups[sid]; }
     else if (key.startsWith('gl:')) { const gk = Buffer.from(key.slice(3), 'hex').toString('utf8'); if (val && val.sid) this.leaders[gk] = String(val.sid); else delete this.leaders[gk]; }
+    else if (key.startsWith('gn:')) { if (val && val.id && !this.notes.some((x) => x.id === val.id)) { this.notes.push(val); this.notes.sort((a, b) => (a.ts || 0) - (b.ts || 0)); } }
     else if (key === 'padlet_err') this.padletErr = (val && val.t) || '';
   }
 
