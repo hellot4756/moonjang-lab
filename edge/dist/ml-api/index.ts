@@ -2255,6 +2255,9 @@ async function handleApi(req, res, pathname, query) {
       }
       padletLastError = '';
       store.patchRecord(rec.id, { posterImg: Object.assign({}, pi, { posted: true, postedAt: Date.now() }), padletAt: Date.now() });
+      try {   // 진단: 저장이 막히거나 실패하면 화면에 이유가 보이게 한다
+        await Promise.race([store.flush(), new Promise((_, rej) => setTimeout(() => rej(new Error('저장이 8초 넘게 끝나지 않았어요')), 8000))]);
+      } catch (e) { throw new HttpError(502, '패들렛에는 올렸지만 기록을 저장하지 못했어요: ' + String((e && e.message) || e).slice(0, 160)); }
       return send(res, 200, { ok: true, posted: true, link: room.link || '' });
     } finally { imgBusy.delete('p' + rec.id); }
   }
