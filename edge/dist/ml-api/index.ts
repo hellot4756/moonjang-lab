@@ -2245,7 +2245,9 @@ async function handleApi(req, res, pathname, query) {
     try {
       const gno = rec.gk ? store.groupOf(st.sid) : 0;
       const gp = gno ? PosterLib.groupPadlet({ no: gno, names: groupMembers(st.cls, gno).map((x) => x.name), comp: rec.compLabel, struct: rec.structLabel, topic: rec.topicLabel, sentence: rec.sentence }) : null;
+      const t0 = Date.now(); store.patchRecord(rec.id, { imgDiag: { step: 'padlet-start', at: t0 } });
       const out = await PADLET.createPost({ key: store.settings.padletApiKey, boardId: cfg.boardId, section: room.section, subject: gp ? gp.subject : `${st.no ? st.no + '번 ' : ''}${st.name}`, body: gp ? gp.body : rec.sentence, imageUrl: pi.url });
+      store.patchRecord(rec.id, { imgDiag: { step: 'padlet-done', ms: Date.now() - t0, ok: !!out.ok, status: out.status || 0, detail: String(out.detail || '').slice(0, 200), at: Date.now() } });
       if (!out.ok) {
         padletLastError = `${new Date().toLocaleTimeString('ko-KR')} ${st.cls} ${st.no}번(이미지): ${out.status || '연결 실패'} ${out.detail || ''}`.slice(0, 300);
         console.log('[패들렛 오류]', padletLastError);
