@@ -515,7 +515,7 @@
           const IM = (IMGS[key] = IMGS[key] || { n: 0, url: '', posted: false, busy: '', msg: '', warn: '' });
           IM.n = Math.max(IM.n, item.imgN || 0);
           if (sv && sv.url && (!IM.url || sv.at > (IM.at || 0))) { IM.url = sv.url; IM.at = sv.at; }
-          if (sv && sv.posted) IM.posted = true;
+          if (sv && sv.posted && sv.url === IM.url) IM.posted = true;
           const left = Math.max(0, mx - IM.n);
           const pic = IM.url ? h('img', { src: IM.url, alt: '만들어진 포스터', style: 'max-width:100%;max-height:360px;margin-top:6px;border-radius:8px' }) : null;
           if (!lead) return h('div', { class: 'notice' }, IM.url ? (IM.posted ? '모둠장이 만든 포스터가 패들렛에 올라갔어요.' : '모둠장이 포스터를 만드는 중이에요.') : '모둠장이 포스터를 만들면 여기에 나타나요.', pic);
@@ -553,7 +553,7 @@
                 watcher.then((f) => (f ? { found: true } : new Promise(() => {}))),
               ]);
               if (o.e) throw o.e;
-              if (o.x) { IM.n = Math.max(IM.n + 1, mx - o.x.left); IM.url = o.x.url; IM.at = Date.now(); }
+              if (o.x) { IM.n = Math.max(IM.n + 1, mx - o.x.left); IM.url = o.x.url; IM.at = Date.now(); IM.posted = false; }
               ok = true;
             } catch (e) {
               IM.warn = e.message;
