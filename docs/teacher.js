@@ -1007,7 +1007,7 @@
 
     // 패들렛 연결: 학생이 자기 번호의 섹션(소회의실)에 바로 올리게 한다
     const pInfo = info.settings.padlet || { keySet: false, classes: {} };
-    const pkey = h('input', { type: 'password', id: 'pkey', autocomplete: 'off', placeholder: pInfo.keySet ? pInfo.keyHint + ' (바꾸려면 새 키 입력)' : '패들렛 개발자 설정의 API 키' });
+    const pkey = h('input', { type: 'password', id: 'pkey', autocomplete: 'new-password', placeholder: pInfo.keySet ? pInfo.keyHint + ' (바꾸려면 새 키 입력)' : '패들렛 개발자 설정의 API 키' });
     let pkind = info.settings.groupMode ? 'group' : 'solo';   // 연결 대상: 개인 활동용 / 모둠 활동용
     const kindRow = h('div', { class: 'chips' });
     const pmsg = h('div', { hidden: true });
@@ -1095,10 +1095,10 @@
     const ai = info.ai;
     const prov = h('select', { id: 'prov' }, h('option', { value: 'claude' }, 'Claude (Anthropic)'), h('option', { value: 'gemini' }, 'Gemini (Google)'));
     prov.value = ai.provider || 'claude';
-    const key = h('input', { type: 'password', id: 'key', autocomplete: 'off', placeholder: ai.claude.configured ? ai.claude.keyHint + ' (바꾸려면 새 키 입력)' : 'sk-ant-...' });
+    const key = h('input', { type: 'password', id: 'key', autocomplete: 'new-password', placeholder: ai.claude.configured ? ai.claude.keyHint + ' (바꾸려면 새 키 입력)' : 'sk-ant-...' });
     const model = h('input', { type: 'text', id: 'model', placeholder: '비워 두면 기본 모델 (' + ai.claude.model + ')' });
     model.value = info.settings.model || '';
-    const gkey = h('input', { type: 'password', id: 'gkey', autocomplete: 'off', placeholder: ai.gemini.configured ? ai.gemini.keyHint + ' (바꾸려면 새 키 입력)' : 'AIza...' });
+    const gkey = h('input', { type: 'password', id: 'gkey', autocomplete: 'new-password', placeholder: ai.gemini.configured ? ai.gemini.keyHint + ' (바꾸려면 새 키 입력)' : 'AIza...' });
     const gmodel = h('input', { type: 'text', id: 'gmodel', placeholder: '비워 두면 기본 모델 (' + ai.gemini.model + ')' });
     gmodel.value = info.settings.geminiModel || '';
     const aiMsg = h('div', { hidden: true });
