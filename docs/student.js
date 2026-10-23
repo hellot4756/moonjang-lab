@@ -317,16 +317,16 @@
   function eligibleSentences() {
     if (S.group) return groupSentences();
     const seen = new Set(), out = [];
-    const add = (id, sentence, topic, comp, struct, verdict) => {
+    const add = (id, sentence, topic, comp, struct, verdict, src) => {
       const key = sentence + '|' + topic;
       if (!sentence || seen.has(key)) return;
-      seen.add(key); out.push({ id, sentence, topic: topic || '', comp: comp || '', struct: struct || '', verdict });
+      seen.add(key); out.push({ id, sentence, topic: topic || '', comp: comp || '', struct: struct || '', verdict, imgN: (src && src.imgN) || 0, posterImg: (src && src.posterImg) || null });
     };
     if (S.last && S.last.sentence && S.last.verdict === 'correct' && S.challenge) {
       const c = S.challenge.conditions;
-      add(S.last.id, S.last.sentence, S.last.topic || c.topic.label, c.comp.label, c.struct.label, S.last.verdict);
+      add(S.last.id, S.last.sentence, S.last.topic || c.topic.label, c.comp.label, c.struct.label, S.last.verdict, S.history.find((x) => x.id === S.last.id));
     }
-    for (const it of S.history) if (it.verdict === 'correct' && inRound(it)) add(it.id, it.sentence, it.topic, it.comp, it.struct, it.verdict);
+    for (const it of S.history) if (it.verdict === 'correct' && inRound(it)) add(it.id, it.sentence, it.topic, it.comp, it.struct, it.verdict, it);
     return out;
   }
 

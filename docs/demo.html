@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>문장 연습실 · 시연판</title>
+<meta name="theme-color" content="#e8ecf0">
+<link rel="stylesheet" href="common.css">
+<style>
+#demoBar{position:sticky;top:0;z-index:9999;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#1d2a3a;color:#fff;font:600 13px/1.45 system-ui,sans-serif}
+#demoBar span{font-weight:400;opacity:.92;flex:1 1 240px}
+#demoBar button{border:1px solid #fff8;background:transparent;color:#fff;border-radius:999px;padding:4px 12px;font:inherit;cursor:pointer}
+#demoEx{position:sticky;top:0;z-index:9998;display:none;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#fff7dd;border-bottom:1px solid #e3d29a;font:13px/1.45 system-ui,sans-serif}
+#demoEx b{margin-right:4px}
+#demoEx button{border:1px solid #b99a2b;background:#fff;border-radius:999px;padding:4px 12px;font:inherit;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="demoBar" role="note"><b>🎮 시연판</b><span>서버·로그인·개인정보 없이 이 화면 안에서만 작동해요. 아무것도 저장·전송되지 않아요. AI 판정은 미리 준비한 예시 문장으로 보여 줘요.</span><button type="button" onclick="location.reload()">처음부터 다시</button></div>
+<div id="demoEx"><b>예시 문장으로 체험하기</b><button type="button" id="exGood">정답 예시 넣기</button><button type="button" id="exBad">오답 예시 넣기</button><span>넣은 뒤 [제출하기]를 눌러요.</span></div>
+<main id="app" class="wrap" aria-live="polite"></main>
+<script>
+window.ML_API = '/__demo';
+try { sessionStorage.clear(); localStorage.removeItem('moonjang.student.v1.bk'); } catch (e) {}
+</script>
+<script src="demo-api.js?v=20261023a"></script>
+<script src="poster.js?v=20261023a"></script>
+<script src="student.js?v=20261023a"></script>
+<script>
+(function () {
+  // 입장 화면: 가상의 학생 정보를 미리 채워 둔다(실제 개인정보를 입력할 필요가 없다).
+  const fill = () => {
+    const a = document.getElementById('sid'), b = document.getElementById('name');
+    if (a && b && !a.value && !b.value) { a.value = '90101'; b.value = '시연 학생'; }
+    const pad = document.getElementById('pad'); document.getElementById('demoEx').style.display = pad ? 'flex' : 'none';
+  };
+  new MutationObserver(fill).observe(document.getElementById('app'), { childList: true, subtree: true }); fill();
+  const put = (k) => {
+    const pad = document.getElementById('pad'); if (!pad) return;
+    pad.value = window.__demoExamples()[k]; pad.dispatchEvent(new Event('input', { bubbles: true })); pad.focus();
+  };
+  document.getElementById('exGood').onclick = () => put('good');
+  document.getElementById('exBad').onclick = () => put('bad');
+})();
+</script>
+</body>
+</html>
