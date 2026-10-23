@@ -24,15 +24,19 @@
 window.ML_API = '/__demo';
 try { sessionStorage.clear(); localStorage.removeItem('moonjang.student.v1.bk'); } catch (e) {}
 </script>
-<script src="demo-api.js?v=20261023a"></script>
-<script src="poster.js?v=20261023a"></script>
-<script src="student.js?v=20261023a"></script>
+<script src="demo-api.js?v=20261023b"></script>
+<script src="poster.js?v=20261023b"></script>
+<script src="student.js?v=20261023b"></script>
 <script>
 (function () {
   // 입장 화면: 가상의 학생 정보를 미리 채워 둔다(실제 개인정보를 입력할 필요가 없다).
   const fill = () => {
     const a = document.getElementById('sid'), b = document.getElementById('name');
-    if (a && b && !a.value && !b.value) { a.value = '90101'; b.value = '시연 학생'; }
+    if (a && b && !a.value && !b.value) {
+      a.value = '단원고 <디지털 창의역량교육> 실천 사례'; b.value = '‘입장하기’ 버튼을 누르세요.';
+      a.readOnly = b.readOnly = true; a.removeAttribute('inputmode'); a.style.fontWeight = '700';
+      b.style.cssText += ';font-size:1.45em;font-weight:800;color:#9b2c1f;background:#fff7f4;border:3px solid #9b2c1f;border-radius:8px;padding:10px 12px';
+    }
     const pad = document.getElementById('pad'); document.getElementById('demoEx').style.display = pad ? 'flex' : 'none';
   };
   new MutationObserver(fill).observe(document.getElementById('app'), { childList: true, subtree: true }); fill();
