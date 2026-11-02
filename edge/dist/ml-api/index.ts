@@ -424,6 +424,7 @@ const DEFAULT_SETTINGS = {
   padlet: {},             // { 반: { boardId, rooms: { 번호: { section, link } } } }
   topicChoice: true,     // 학생이 주제를 바꾸거나 직접 쓸 수 있게 하기
   qType: 'cs',           // 문제 유형: 'cs' 성분+짜임 | 'gram' 문법 요소(+성분 또는 짜임 하나) | 'mixed' 섞어서
+  gramN: 1,              // 문법 요소형 문제에서 한 문장에 넣을 문법 요소 개수(1~3)
   topicCat: 'ad',        // 내용 범주: 'ad' 공익광고 | 'daily' 일상 언어 | 'mixed' 섞어서
   poster: true,          // 학생에게 '포스터 프롬프트 만들기' 열기
   aiMode: 'on',          // 'on' = AI가 문법 판정 | 'off' = AI 없이 선생님이 직접 판정
@@ -547,6 +548,7 @@ class Store {
     if (typeof patch.topicChoice === 'boolean') s.topicChoice = patch.topicChoice;
     if (['cs', 'gram', 'mixed'].includes(patch.qType)) s.qType = patch.qType;
     if (['ad', 'daily', 'mixed'].includes(patch.topicCat)) s.topicCat = patch.topicCat;
+    if (Number.isInteger(patch.gramN) && patch.gramN >= 1 && patch.gramN <= 3) s.gramN = patch.gramN;
     if (typeof patch.padletApiKey === 'string') s.padletApiKey = patch.padletApiKey.trim().slice(0, 300);
     if (patch.padletClass && typeof patch.padletClass === 'object') {
       const { cls, boardId, rooms, boardUrl, allUrl, kind } = patch.padletClass;
@@ -1087,7 +1089,14 @@ function gramConflict(gramId, otherId) {
   }
   return false;
 }
-module.exports = { GRAM_CATS, DEFAULT_GRAMS, DEFAULT_DAILY, gramConflict };
+const IMP = ['g-imper', 'g-propos'], NEG = ['g-neg-an', 'g-neg-mot', 'g-neg-long'], TIME = ['g-past', 'g-future'];
+function gramPairConflict(a, b, catA, catB) {
+  if (catA && catA === catB) return true;
+  if (a === 'g-neg-imper' || b === 'g-neg-imper') return true;   // '-지 마라'는 명령·청유문 전용이라 여러 개 조건에서는 쓰지 않는다
+  const bad = (x, y) => IMP.includes(x) && (NEG.includes(y) || TIME.includes(y));
+  return bad(a, b) || bad(b, a);
+}
+module.exports = { GRAM_CATS, DEFAULT_GRAMS, DEFAULT_DAILY, gramConflict, gramPairConflict };
 });
 __def('conditions', function (module, exports, require, process, Buffer) {
 'use strict';
@@ -1393,12 +1402,14 @@ function draw(level, rnd, recent, bias, forcedStruct, opts) {
   const seven = state.seven.mode === 'seven';
   const grams = state.grams.filter((x) => !x.off);
   const qt = opts.qType === 'gram' || opts.qType === 'mixed' ? opts.qType : 'cs';
+  const gramN = Math.max(1, Math.min(3, parseInt(opts.gramN, 10) || 1));
   const useGram = grams.length > 0 && (qt === 'gram' || (qt === 'mixed' && rnd() < 0.5));
   if (useGram) {
     const side = forcedStruct ? 'struct' : (rnd() < 0.5 ? 'comp' : 'struct');
     for (let tries = 0; tries < 30; tries++) {
       const gs = poolFor(grams, level, rnd);
       const gram = gs[Math.floor(rnd() * gs.length)];
+      if (gramN > 1 && gram.id === 'g-neg-imper') continue;
       let compId = '-', structId = '-';
       if (side === 'struct') {
         const ss = poolFor(state.structs, level, rnd);
@@ -1409,12 +1420,18 @@ function draw(level, rnd, recent, bias, forcedStruct, opts) {
       }
       const topic = topics[Math.floor(rnd() * topics.length)];
       if (tries < 29 && GR.gramConflict(gram.id, side === 'struct' ? structId : compId)) continue;
+      const chosen = [gram];
+      for (let k = 1; k < gramN; k++) {   // 문법 요소를 더 넣는다: 같은 갈래는 피하고, 서로 모순되는 것은 뺀다
+        const cands = poolFor(grams, level, rnd).filter((c) => !chosen.some((x) => GR.gramPairConflict(x.id, c.id, x.cat, c.cat)) && !GR.gramConflict(c.id, side === 'struct' ? structId : compId));
+        if (!cands.length) break;
+        chosen.push(cands[Math.floor(rnd() * cands.length)]);
+      }
       if (tries < 20) {
         if ((recent.grams || []).includes(gram.id)) continue;
         if (side === 'comp' && (recent.comps || []).includes(compId)) continue;
         if ((recent.topics || []).includes(topic.id)) continue;
       }
-      return { comp: compId, struct: structId, topic: topic.id, gram: gram.id };
+      return { comp: compId, struct: structId, topic: topic.id, gram: chosen.map((x) => x.id).join('+') };
     }
     const gram0 = grams[0], topic0 = topics[0];
     const struct0 = (forcedStruct && byId(state.structs, forcedStruct)) || state.structs.find((x) => !x.off);
@@ -1445,11 +1462,24 @@ function draw(level, rnd, recent, bias, forcedStruct, opts) {
   const comp = seven ? { id: 'p:' + state.seven.pool[0] } : state.comps.find((x) => !x.off);
   return { comp: comp.id, struct: struct.id, topic: topic.id };
 }
+function gramCondition(idStr) {
+  const ids = String(idStr || '').split('+').filter(Boolean);
+  const items = ids.map((id) => byId(state.grams, id));
+  if (!items.length || items.some((x) => !x)) return null;
+  if (items.length === 1) return Object.assign({ items }, items[0]);
+  return {
+    id: ids.join('+'), level: items.some((x) => x.level === 'basic') ? 'basic' : 'easy',
+    cat: items.map((x) => x.cat).join(' · '), label: items.map((x) => x.label).join(' + '),
+    short: items.map((x) => x.short).join(' / '), example: items.map((x) => x.example).filter(Boolean).join(' / '),
+    rubric: `다음 ${items.length}개 문법 요소 조건을 모두 충족해야 충족이다. 하나라도 없으면 불충족이며, 어느 조건이 빠졌는지 reason·fix에서 알려 준다.\n` + items.map((x, i) => `(${i + 1}) ${x.label}: ${x.rubric}`).join('\n'),
+    items,
+  };
+}
 function resolve(ids) {
   const comp = ids.comp === '-' ? NONE : (partCondition(ids.comp) || byId(state.comps, ids.comp));
   const struct = ids.struct === '-' ? NONE : byId(state.structs, ids.struct);
   const topic = byId(state.topics, ids.topic);
-  const gram = ids.gram ? byId(state.grams, ids.gram) : null;
+  const gram = ids.gram ? gramCondition(ids.gram) : null;
   if (!comp || !struct || !topic || (ids.gram && !gram)) return null;
   if (comp.none && struct.none) return null;
   return { comp, struct, topic, gram };
@@ -1460,7 +1490,8 @@ function publicView(r) {
     comp: pick(r.comp),
     struct: pick(r.struct),
     topic: { id: r.topic.id, label: r.topic.label, cat: r.topic.cat === 'daily' ? 'daily' : 'ad' },
-    gram: r.gram ? { id: r.gram.id, level: r.gram.level, label: r.gram.label, short: r.gram.short, example: r.gram.example, cat: r.gram.cat } : null,
+    gram: r.gram ? { id: r.gram.id, level: r.gram.level, label: r.gram.label, short: r.gram.short, example: r.gram.example, cat: r.gram.cat,
+      items: (r.gram.items || [r.gram]).map((x) => ({ id: x.id, label: x.label, short: x.short, example: x.example, cat: x.cat })) } : null,
   };
 }
 module.exports = { PARTS, GRAM_CATS: GR.GRAM_CATS, init, setHook, load, snapshot, replace, reset, counts, isCustomized, draw, resolve, publicView, byId };
@@ -1818,7 +1849,7 @@ function mulberry(seed) {
   return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 function hashStr(str) { let h = 2166136261; for (const ch of String(str)) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
-function drawOpts() { return { qType: store.settings.qType || 'cs', topicCat: store.settings.topicCat || 'ad' }; }
+function drawOpts() { return { qType: store.settings.qType || 'cs', topicCat: store.settings.topicCat || 'ad', gramN: store.settings.gramN || 1 }; }
 function groupSlots(cls, no, planIn) {
   const plan = planIn || store.settings.groupPlan || {};
   const structs = C.snapshot().structs;
@@ -1829,7 +1860,7 @@ function groupSlots(cls, no, planIn) {
   const recent = { comps: [], structs: [], topics: [], grams: [] };
   return picks.map((structId, i) => {
     const ids = C.draw(store.settings.level, r, { comps: recent.comps.slice(-3), structs: [], topics: recent.topics.slice(-3), grams: recent.grams.slice(-3) }, '', structId, drawOpts());
-    recent.comps.push(ids.comp); recent.topics.push(ids.topic); if (ids.gram) recent.grams.push(ids.gram);
+    recent.comps.push(ids.comp); recent.topics.push(ids.topic); if (ids.gram) recent.grams.push(...ids.gram.split('+'));
     return { i, n: `g${seed}.${hashStr(cls + '|' + no).toString(36)}.${i}`, ids };
   });
 }
@@ -1859,7 +1890,7 @@ function groupData(cls, no, rid) {
       const okRec = mine.filter((r) => finalVerdict(r) === 'correct').pop() || null;
       const pend = okRec ? null : mine.filter((r) => finalVerdict(r) === 'pending').pop() || null;
       const rec = okRec || pend || mine[mine.length - 1];
-      return { i, conds: null, tries: mine.length, status: okRec ? 'done' : pend ? 'pending' : 'todo', id: rec.id, sentence: rec.sentence, by: rec.name, topic: rec.topicLabel, comp: rec.compLabel, struct: rec.structLabel, gram: rec.gramLabel || '', padletAt: rec.padletAt || 0, poster: rec.poster || null, imgN: rec.imgN || 0, posterImg: rec.posterImg || null, roomDone: rec.roomDone || 0, notes: notesOf(`${cls}|${no}`, cid) };
+      return { i, conds: null, tries: mine.length, status: okRec ? 'done' : pend ? 'pending' : 'todo', id: rec.id, sentence: rec.sentence, by: rec.name, topic: rec.topicLabel, comp: rec.compLabel, struct: rec.structLabel, gram: rec.gramLabel || '', daily: rec.topicCat === 'daily', padletAt: rec.padletAt || 0, poster: rec.poster || null, imgN: rec.imgN || 0, posterImg: rec.posterImg || null, roomDone: rec.roomDone || 0, notes: notesOf(`${cls}|${no}`, cid) };
     });
     out.total = out.slots.length;
     out.done = out.slots.filter((x) => x.status === 'done').length;
@@ -1877,7 +1908,7 @@ function groupData(cls, no, rid) {
       i: sl.i, conds: view, tries: mine.length,
       status: okRec ? 'done' : pend ? 'pending' : 'todo',
       id: rec ? rec.id : '', sentence: rec ? rec.sentence : '', by: rec ? rec.name : '', topic: rec ? rec.topicLabel : (view ? view.topic.label : ''),
-      comp: res ? res.comp.label : '', struct: res ? res.struct.label : '', gram: res && res.gram ? res.gram.label : '', padletAt: rec ? rec.padletAt || 0 : 0,
+      comp: res ? res.comp.label : '', struct: res ? res.struct.label : '', gram: res && res.gram ? res.gram.label : '', daily: rec ? rec.topicCat === 'daily' : !!(view && view.topic.cat === 'daily'), padletAt: rec ? rec.padletAt || 0 : 0,
       poster: rec && rec.poster ? rec.poster : null, imgN: rec ? rec.imgN || 0 : 0, posterImg: rec ? rec.posterImg || null : null, roomDone: rec ? rec.roomDone || 0 : 0,
       notes: notesOf(`${cls}|${no}`, sl.n),
     };
@@ -1935,7 +1966,7 @@ async function gboardData(cls, rid) {
       return { sid: m.sid, name: m.name, no: m.no, online, typing, draftLen: typing ? a.draftLen : 0, leader: !!ld && ld.sid === m.sid };
     });
     const state = d.total && d.done === d.total ? 'done' : (d.tries || d.done || d.pending) ? 'doing' : 'idle';
-    groups.push({ no, state, total: d.total, done: d.done, pending: d.pending, tries: d.tries, wrong: d.wrong, last: d.last, members, slots: d.slots.map((x) => ({ i: x.i, status: x.status, sentence: x.sentence, by: x.by, comp: x.comp, struct: x.struct, gram: x.gram || '', topic: x.topic, tries: x.tries, id: x.id, padletAt: x.padletAt, notes: x.notes || [] })) });
+    groups.push({ no, state, total: d.total, done: d.done, pending: d.pending, tries: d.tries, wrong: d.wrong, last: d.last, members, slots: d.slots.map((x) => ({ i: x.i, status: x.status, sentence: x.sentence, by: x.by, comp: x.comp, struct: x.struct, gram: x.gram || '', daily: !!x.daily, topic: x.topic, tries: x.tries, id: x.id, padletAt: x.padletAt, notes: x.notes || [] })) });
   }
   const unassigned = store.students.filter((x) => x.cls === cls && !store.groupOf(x.sid)).map((x) => ({ name: x.name, no: x.no, online: (presence.get(x.sid) || 0) > now - 5 * 60 * 1000 }));
   return { cls, groups, unassigned, count, planTotal: Object.values(store.settings.groupPlan || {}).reduce((a, b) => a + b, 0) };
@@ -1962,7 +1993,7 @@ function myHistory(st, limit) {
       verdict: finalVerdict(r), flagged: !!r.flagged, by: r.gk ? r.name : '', gno: r.gno || 0,
       tfeedback: r.tfeedback || '', tfeedbackAt: r.tfeedbackAt || 0, padletAt: r.padletAt || 0,
       poster: r.poster && r.poster.prompt ? { prompt: r.poster.prompt } : null, imgN: r.imgN || 0, posterImg: r.posterImg || null,
-      comp: r.compLabel, struct: r.structLabel, gram: r.gramLabel || '', topic: r.topicLabel,
+      comp: r.compLabel, struct: r.structLabel, gram: r.gramLabel || '', topic: r.topicLabel, topicCat: r.topicCat || 'ad',
     });
   }
   return out;
@@ -1981,7 +2012,7 @@ function recentConditions(sid) {
     const r = store.records[i];
     if (r.sid !== sid || seen.has(r.cid)) continue;
     seen.add(r.cid);
-    comps.push(r.comp); structs.push(r.struct); topics.push(r.topic); if (r.gram) grams.push(r.gram);
+    comps.push(r.comp); structs.push(r.struct); topics.push(r.topic); if (r.gram) grams.push(...String(r.gram).split('+'));
   }
   return { comps, structs, topics, grams };
 }
@@ -2052,7 +2083,7 @@ function teacherInfo() {
       aiMode: store.settings.aiMode === 'off' ? 'off' : 'on',
       poster: store.settings.poster !== false,
       topicChoice: store.settings.topicChoice !== false,
-      qType: store.settings.qType || 'cs', topicCat: store.settings.topicCat || 'ad',
+      qType: store.settings.qType || 'cs', topicCat: store.settings.topicCat || 'ad', gramN: store.settings.gramN || 1,
       groupMode: groupOn(), groupCount: store.settings.groupCount || 8, groupPlan: store.settings.groupPlan || {},
       observerPassword: store.settings.observerPassword || '',
       observerClasses: store.settings.observerClasses || [],
@@ -2450,7 +2481,7 @@ async function handleApi(req, res, pathname, query) {
     const rec = st.demo ? { id: 'demo-' + ch.n + '-' + attempt } : store.addRecord(Object.assign({
       ts: Date.now(), sid: st.sid, name: st.name, cls: st.cls, cid: ch.n, attempt, rd: ar.id,
       comp: ch.ids.comp, struct: ch.ids.struct, topic: ch.ids.topic, gram: ch.ids.gram || '',
-      compLabel: resolved.comp.label, structLabel: resolved.struct.label, gramLabel: resolved.gram ? resolved.gram.label : '', topicLabel, topicCustom,
+      compLabel: resolved.comp.label, structLabel: resolved.struct.label, gramLabel: resolved.gram ? resolved.gram.label : '', topicLabel, topicCustom, topicCat: (topicObj || resolved.topic).cat === 'daily' ? 'daily' : 'ad',
       sentence, flagged: false,
     }, ch.g ? { gk: ch.g, gno: store.groupOf(st.sid) } : {}, fields));
     const reveal = fields.verdict === 'correct' || (store.settings.revealAfter > 0 && attempt >= store.settings.revealAfter && fields.verdict === 'incorrect');
@@ -2458,6 +2489,7 @@ async function handleApi(req, res, pathname, query) {
       id: rec.id,
       attempt,
       topic: topicLabel,
+      topicCat: (topicObj || resolved.topic).cat === 'daily' ? 'daily' : 'ad',
       verdict: fields.verdict,
       checks: fields.checks,
       analysis: fields.analysis,
@@ -2489,6 +2521,7 @@ async function handleApi(req, res, pathname, query) {
       if (!rec || !rec.gk || rec.gk !== groupKey(st)) throw new HttpError(404, '문장을 찾을 수 없어요.');
       if (!activeRound() || recRound(rec) !== activeRound().id) throw new HttpError(403, '끝난 회차의 내용은 고칠 수 없어요.');
       if (finalVerdict(rec) !== 'correct') throw new HttpError(400, '문법 조건을 통과한 문장만 포스터를 만들 수 있어요.');
+      if (rec.topicCat === 'daily') throw new HttpError(400, '일상 언어 문장은 포스터를 만들지 않아요.');
       if (store.settings.imageGen && (rec.imgN || 0) >= (store.settings.imageMax || 2)) throw new HttpError(403, '이미지 만들기 횟수를 모두 써서 프롬프트를 새로 만들 수 없어요.');
       store.patchRecord(rec.id, { poster: { opts, prompt, promptEn: String(b.promptEn || '').trim().slice(0, 4000), by: st.name, at: Date.now() }, roomDone: 0 });
     }
@@ -2565,6 +2598,7 @@ async function handleApi(req, res, pathname, query) {
       if (b.topicChoice !== undefined) patch.topicChoice = !!b.topicChoice;
       if (b.qType !== undefined) patch.qType = b.qType;
       if (b.topicCat !== undefined) patch.topicCat = b.topicCat;
+      if (b.gramN !== undefined) patch.gramN = parseInt(b.gramN, 10);
       if (b.groupMode !== undefined) patch.groupMode = !!b.groupMode;
       if (b.groupCount !== undefined) patch.groupCount = parseInt(b.groupCount, 10);
       if (b.groupPlan && typeof b.groupPlan === 'object') patch.groupPlan = b.groupPlan;

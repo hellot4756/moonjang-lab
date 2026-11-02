@@ -91,7 +91,7 @@
             message: '시연판에서는 AI 판정을 하지 않아요. 아래 [정답 예시 넣기]·[오답 예시 넣기]를 눌러 판정 화면을 체험해 보세요.' });
         }
         const r = isGood ? c.goodRes : c.badRes; const id = 'demo-' + (++st.n);
-        if (isGood) st.hist.push({ id, ts: Date.now(), attempt: a, sentence, rd: RD.id, rdName: RD.name, verdict: 'correct', flagged: false, by: '', gno: 0, tfeedback: '', tfeedbackAt: 0, padletAt: 0, poster: null, imgN: 0, posterImg: null, comp: c.v.comp.label, struct: c.v.struct.label, gram: c.v.gram ? c.v.gram.label : '', topic: body.topicText || c.v.topic.label });
+        if (isGood) st.hist.push({ id, ts: Date.now(), attempt: a, sentence, rd: RD.id, rdName: RD.name, verdict: 'correct', flagged: false, by: '', gno: 0, tfeedback: '', tfeedbackAt: 0, padletAt: 0, poster: null, imgN: 0, posterImg: null, comp: c.v.comp.label, struct: c.v.struct.label, gram: c.v.gram ? c.v.gram.label : '', topicCat: c.v.topic.cat, topic: body.topicText || c.v.topic.label });
         return j({ id, attempt: a, topic: body.topicText || c.v.topic.label, verdict: isGood ? 'correct' : 'incorrect', checks: r.checks, analysis: r.analysis, tip: r.tip, example: isGood || a >= 3 ? r.example : '', manual: false, message: '' });
       }
       case '/api/poster': return j({ id: 'demo' });

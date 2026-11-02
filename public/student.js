@@ -175,22 +175,30 @@
   function groupSentences() {
     const G = S.group;
     if (!G || !G.slots) return [];
-    return G.slots.filter((x) => x.status === 'done').map((x) => ({ id: x.id, slot: x.i, sentence: x.sentence, topic: x.topic || '', comp: x.comp || '', struct: x.struct || '', gram: x.gram || '', verdict: x.status === 'done' ? 'correct' : 'pending', padletAt: x.padletAt || 0, imgN: x.imgN || 0, posterImg: x.posterImg || null }));
+    return G.slots.filter((x) => x.status === 'done').map((x) => ({ id: x.id, slot: x.i, sentence: x.sentence, topic: x.topic || '', comp: x.comp || '', struct: x.struct || '', gram: x.gram || '', daily: !!x.daily, verdict: x.status === 'done' ? 'correct' : 'pending', padletAt: x.padletAt || 0, imgN: x.imgN || 0, posterImg: x.posterImg || null }));
   }
 
   // 지금 열려 있는 회차의 기록인지(지난 회차의 문장은 보기만 하고 이어서 할 수 없다)
   function inRound(it) { return S.demo || (!!S.round && it.rd === S.round.id); }
 
+  // 방금 푼 문제가 일상 언어 상황인지(학생이 다른 주제·상황을 골랐으면 그 갈래를 따른다)
+  function isDailyNow() {
+    const c = S.challenge; if (!c) return false;
+    if (S.last && S.last.topicCat) return S.last.topicCat === 'daily';
+    const t = S.topicText && c.topicCats ? c.topicCats[S.topicText] : '';
+    return (t || (c.conditions.topic && c.conditions.topic.cat)) === 'daily';
+  }
+
   function posterSentences() {
     if (S.group) return groupSentences();
     const seen = new Set(), out = [];
-    const add = (id, sentence, topic, verdict) => {
+    const add = (id, sentence, topic, verdict, daily) => {
       const key = sentence + '|' + topic;
-      if (!sentence || seen.has(key)) return;
+      if (!sentence || seen.has(key) || daily) return;   // 일상 언어 문장은 포스터를 만들지 않는다
       seen.add(key); out.push({ id, sentence, topic: topic || '', verdict });
     };
-    if (S.last && S.last.sentence && S.last.verdict === 'correct' && S.challenge) add(S.last.id, S.last.sentence, S.last.topic || S.challenge.conditions.topic.label, S.last.verdict);
-    for (const it of S.history) if (it.verdict === 'correct' && inRound(it)) add(it.id, it.sentence, it.topic, it.verdict);
+    if (S.last && S.last.sentence && S.last.verdict === 'correct' && S.challenge) add(S.last.id, S.last.sentence, S.last.topic || S.challenge.conditions.topic.label, S.last.verdict, isDailyNow());
+    for (const it of S.history) if (it.verdict === 'correct' && inRound(it)) add(it.id, it.sentence, it.topic, it.verdict, it.topicCat === 'daily');
     return out;
   }
 
@@ -317,14 +325,14 @@
   function eligibleSentences() {
     if (S.group) return groupSentences();
     const seen = new Set(), out = [];
-    const add = (id, sentence, topic, comp, struct, verdict, src, gram) => {
+    const add = (id, sentence, topic, comp, struct, verdict, src, gram, daily) => {
       const key = sentence + '|' + topic;
       if (!sentence || seen.has(key)) return;
-      seen.add(key); out.push({ id, sentence, topic: topic || '', comp: comp || '', struct: struct || '', gram: gram || (src && src.gram) || '', verdict, imgN: (src && src.imgN) || 0, posterImg: (src && src.posterImg) || null });
+      seen.add(key); out.push({ id, sentence, topic: topic || '', comp: comp || '', struct: struct || '', gram: gram || (src && src.gram) || '', daily: !!(daily || (src && src.topicCat === 'daily')), verdict, imgN: (src && src.imgN) || 0, posterImg: (src && src.posterImg) || null });
     };
     if (S.last && S.last.sentence && S.last.verdict === 'correct' && S.challenge) {
       const c = S.challenge.conditions;
-      add(S.last.id, S.last.sentence, S.last.topic || c.topic.label, c.comp.label, c.struct.label, S.last.verdict, S.history.find((x) => x.id === S.last.id), c.gram ? c.gram.label : '');
+      add(S.last.id, S.last.sentence, S.last.topic || c.topic.label, c.comp.label, c.struct.label, S.last.verdict, S.history.find((x) => x.id === S.last.id), c.gram ? c.gram.label : '', isDailyNow());
     }
     for (const it of S.history) if (it.verdict === 'correct' && inRound(it)) add(it.id, it.sentence, it.topic, it.comp, it.struct, it.verdict, it);
     return out;
@@ -378,7 +386,7 @@
       pmsg.id = 'pad-pmsg';
       kids.push(h('div', { class: 'wrap', style: 'max-width:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)' },
         h('p', { class: 'muted small' }, '위 글을 내 패들렛 방에 바로 올려요. 제목에는 내 번호와 이름이 자동으로 들어가요. 문장이 맞는지 확인하고 눌러 주세요.'),
-        h('div', { class: 'actions' }, go, postedAt && !S.posterOn ? roomLink : null), pmsg));
+        h('div', { class: 'actions' }, go, postedAt && !(S.posterOn && !item.daily) ? roomLink : null), pmsg));
       if (postedAt) kids.push(nextStep(item, roomLink));
     } else if (roomLink) {
       kids.push(h('div', { class: 'actions' }, roomLink, h('span', { class: 'muted small' }, '복사한 글을 내 방에 붙여 넣고 포스터를 올려 주세요.')));
@@ -388,7 +396,7 @@
 
   // 올린 뒤 이어지는 안내: 포스터 프롬프트 만들기 -> 복사 -> 내 방으로
   function nextStep(item, roomLink) {
-    if (!S.posterOn) return h('div', { class: 'notice ok' }, '다 올렸어요. 포스터 그림은 내 패들렛 방에서 이어서 올려 주세요.');
+    if (!S.posterOn || item.daily) return h('div', { class: 'notice ok' }, '다 올렸어요. 포스터 그림은 내 패들렛 방에서 이어서 올려 주세요.');
     return h('div', { class: 'notice ok', style: 'margin-top:12px' },
       h('strong', null, '다음 단계: '), '이 문장으로 포스터 프롬프트를 만들어요. 만든 프롬프트를 복사한 뒤 내 패들렛 방으로 가서 그림을 올려요.',
       h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'button', onclick: () => {
@@ -429,13 +437,14 @@
     const hasAll = !!(S.padlet && S.padlet.all);
     const steps = [];
     const p2 = S.demo || !S.round || S.round.phase >= 2;   // 2차시가 열려야 포스터 단계가 나타난다
-    const imgMode = !!(S.imageGen && S.posterOn);   // 이미지 만들기가 켜져 있으면 글 올리기·복사 단계는 건너뛴다
-    if (S.padlet.post && !(imgMode && p2)) steps.push({ id: 'post', title: S.group ? '모둠 패들렛 방에 광고문구 올리기' : '내 패들렛에 광고문구 올리기', done: !!postedAt || roomShared });
-    if (p2 && S.posterOn) {
+    const pOn = S.posterOn && !item.daily;   // 일상 언어 문장은 포스터 단계 없이 패들렛 올리기까지만
+    const imgMode = !!(S.imageGen && pOn);   // 이미지 만들기가 켜져 있으면 글 올리기·복사 단계는 건너뛴다
+    if (S.padlet.post && !(imgMode && p2)) steps.push({ id: 'post', title: item.daily ? (S.group ? '모둠 패들렛 방에 문장 올리기' : '내 패들렛에 문장 올리기') : S.group ? '모둠 패들렛 방에 광고문구 올리기' : '내 패들렛에 광고문구 올리기', done: !!postedAt || roomShared });
+    if (p2 && pOn) {
       steps.push({ id: 'make', title: '포스터 프롬프트 만들기', done: roomShared || (lead ? !!PS.out : !!outP) });
       if (!imgMode) steps.push({ id: 'copy', title: lead ? '프롬프트 복사하기' : '프롬프트 확인하기', done: roomShared || (lead ? !!M.copied : !!outP) });
     }
-    if (p2) steps.push({ id: 'room', title: imgMode ? '포스터 만들어 올리기' : S.posterOn ? '패들렛 방에서 포스터 만들어 올리기' : '내 패들렛 방으로 가기', done: roomShared || (lead && (!!PS.done || (imgMode && !!(item.posterImg && item.posterImg.posted && PS.out && item.posterImg.prompt === (PS.out.en || PS.out.ko || '').trim())))) });
+    if (p2) steps.push({ id: 'room', title: imgMode ? '포스터 만들어 올리기' : pOn ? '패들렛 방에서 포스터 만들어 올리기' : '내 패들렛 방으로 가기', done: roomShared || (lead && (!!PS.done || (imgMode && !!(item.posterImg && item.posterImg.posted && PS.out && item.posterImg.prompt === (PS.out.en || PS.out.ko || '').trim())))) });
     if (hasAll) steps.push({ id: 'others', title: p2 ? '다른 친구들 포스터 보기' : '다른 친구들이 올린 글 모두 보기', done: !!M.others });
     if (!steps.length) {
       return h('section', { class: 'card mission', id: 'mission' }, h('h2', null, '1차시 활동 완료'), h('div', { class: 'notice ok' }, '문장 만들기를 마쳤어요. 포스터 만들기는 2차시에 해요. 선생님이 2차시를 열면 여기에 나타나요.'));
@@ -589,7 +598,7 @@
           const go2 = S.padlet.link ? h('a', { class: 'btn big' + (posted ? ' primary' : ''), href: posted ? S.padlet.link : null, target: '_blank', rel: 'noopener', 'aria-disabled': posted ? null : 'true', style: posted ? '' : 'opacity:.45;pointer-events:none', onclick: () => { M.opened = true; save(); } }, posted ? (S.padlet.board ? '패들렛 보드에서 확인하기 →' : '내 패들렛 방에서 확인하기 →') : '패들렛 가기 (그림이 올라가면 열려요)') : null;
           return [imgBox, h('div', { class: 'actions' }, go2)];
         }
-        const needCopy = lead && S.posterOn && !M.copied && PS.out;
+        const needCopy = lead && pOn && !M.copied && PS.out;
         const reCopy = needCopy ? h('div', { class: 'notice warn' }, '프롬프트를 아직 복사하지 않았어요. ', h('button', { class: 'btn sm', type: 'button', onclick: async () => { const ok = await copyText(PS.out[PS.lang === 'en' ? 'en' : 'ko'], document.createElement('textarea')); if (ok) { M.copied = true; save(); redraw(); } } }, '지금 복사하기')) : null;
         const adTa = !S.padlet.post && lead ? (() => {
           const st = S.student;
@@ -775,8 +784,8 @@
   // 이번 문제의 조건 개수(문법 조건 + 주제·상황)를 우리말로
   function condCountWord(c) {
     const k = c.conditions || {};
-    const n = (k.comp && !k.comp.none ? 1 : 0) + (k.struct && !k.struct.none ? 1 : 0) + (k.gram ? 1 : 0) + 1;
-    return ['', '한 가지', '두', '세', '네', '다섯'][n] || n + '가지';
+    const n = (k.comp && !k.comp.none ? 1 : 0) + (k.struct && !k.struct.none ? 1 : 0) + (k.gram ? (k.gram.items || [k.gram]).length : 0) + 1;
+    return ['', '한 가지', '두', '세', '네', '다섯', '여섯'][n] || n + '가지';
   }
 
   // 주제 줄: 선생님이 허용하면 기존 주제 목록에서 다른 주제를 고를 수 있다(직접 입력은 없다).
@@ -1014,7 +1023,7 @@
         h('div', { class: 'conds' },
           condRow('문장 성분', c.conditions.comp),
           condRow('문장의 짜임', c.conditions.struct),
-          c.conditions.gram ? condRow('문법 요소 · ' + (c.conditions.gram.cat || ''), c.conditions.gram) : null,
+          ...(c.conditions.gram ? (c.conditions.gram.items || [c.conditions.gram]) : []).map((g) => condRow('문법 요소 · ' + (g.cat || ''), g)),
           topicRow(c)),
         h('p', { class: 'muted small', style: 'margin-top:12px' }, `${condCountWord(c)} 조건을 모두 만족하는 문장 한 개를 써서 제출하세요.`), h('p', { class: 'sig', style: 'text-align:right;margin-top:6px' }, '- A.N. -')));
       nodes.push(h('section', { class: 'card' },

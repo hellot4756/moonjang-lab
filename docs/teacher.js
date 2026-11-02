@@ -975,17 +975,20 @@
     tc.value = info.settings.topicChoice === false ? '0' : '1';
     const qt = h('select', { id: 'qt' }, h('option', { value: 'cs' }, '성분 + 짜임 (지금까지의 방식)'), h('option', { value: 'gram' }, '문법 요소형: 문법 요소 1개 + 성분 또는 짜임 1개'), h('option', { value: 'mixed' }, '두 유형을 섞어서'));
     qt.value = info.settings.qType || 'cs';
+    const gn = h('select', { id: 'gn' }, h('option', { value: '1' }, '1개'), h('option', { value: '2' }, '2개'), h('option', { value: '3' }, '3개'));
+    gn.value = String(info.settings.gramN || 1);
     const tcat = h('select', { id: 'tcat' }, h('option', { value: 'ad' }, '공익광고 주제'), h('option', { value: 'daily' }, '일상 언어 상황'), h('option', { value: 'mixed' }, '두 가지를 섞어서'));
     tcat.value = info.settings.topicCat || 'ad';
     const saveClass = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
-      try { T.info = await api('/api/teacher/settings', { level: lv.value, revealAfter: parseInt(rv.value, 10), poster: po.value === '1', topicChoice: tc.value === '1', qType: qt.value, topicCat: tcat.value }, 'PUT'); toast('저장했어요.'); } catch (e) { toast(e.message, true); }
+      try { T.info = await api('/api/teacher/settings', { level: lv.value, revealAfter: parseInt(rv.value, 10), poster: po.value === '1', topicChoice: tc.value === '1', qType: qt.value, gramN: parseInt(gn.value, 10), topicCat: tcat.value }, 'PUT'); toast('저장했어요.'); } catch (e) { toast(e.message, true); }
     } }, '저장');
     const classCard = h('section', { class: 'card' }, h('h2', null, '수업 설정'),
       h('div', { class: 'wrap', style: 'max-width:520px' },
         h('label', { class: 'field', for: 'lv' }, '문장의 짜임 난이도 (문장 성분 개수는 [조건 관리]에서 정해요)', lv),
         h('label', { class: 'field', for: 'rv' }, '예시 문장 공개', rv),
         h('label', { class: 'field', for: 'qt' }, '문제 유형 (모둠 활동 중에 바꾸면 새 문제가 나오니 수업 전에 정해 주세요)', qt),
-        h('label', { class: 'field', for: 'tcat' }, '내용 범주 (문장의 내용·소재)', tcat),
+        h('label', { class: 'field', for: 'gn' }, '문법 요소 개수 (문법 요소형·섞어서일 때 한 문장에 넣을 문법 요소 수. 2개 이상이면 서로 다른 갈래에서 모순되지 않게 뽑아요)', gn),
+        h('label', { class: 'field', for: 'tcat' }, '내용 범주 (문장의 내용·소재). 일상 언어 상황에서는 포스터 단계가 없어요', tcat),
         h('label', { class: 'field', for: 'tc' }, '주제·상황 선택', tc),
         h('label', { class: 'field', for: 'po' }, '포스터 프롬프트', po),
         h('div', null, saveClass),
