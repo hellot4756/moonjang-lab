@@ -2,6 +2,7 @@
 (function () {
   const app = document.getElementById('app');
   const KEY = 'moonjang.student.v1';
+  const IMGS = {};   // 문장별 이미지 만들기 상태
 
   function h(tag, props, ...kids) {
     const el = document.createElement(tag);
@@ -134,7 +135,7 @@
   async function enter() {
     try {
       const me = await api('/api/me');
-      S.demo = !!me.demo; S.round = me.round || null; S.student = me.student; S.stats = me.stats; S.history = me.history; S.posterOn = !!me.poster; S.padletTemplate = me.padletTemplate || ''; S.padlet = me.padlet || { post: false, link: '' };
+      S.demo = !!me.demo; S.round = me.round || null; S.student = me.student; S.stats = me.stats; S.history = me.history; S.posterOn = !!me.poster; S.imageGen = !!me.imageGen; S.imageMax = me.imageMax || 2; S.padletTemplate = me.padletTemplate || ''; S.padlet = me.padlet || { post: false, link: '' };
       S.group = me.group || null;
       if (S.demo && S.group && S.group.demoId) { try { const sv = JSON.parse(sessionStorage.getItem(DGKEY) || 'null'); if (sv && sv.demoId === S.group.demoId && sv.slots.length === S.group.slots.length) S.group = sv; } catch (e) { /* 새로 시작 */ } }
       const rid = S.round ? S.round.id : '';   // 저장해 둔 조건·결과가 지난 회차 것이면 버린다
@@ -174,7 +175,7 @@
   function groupSentences() {
     const G = S.group;
     if (!G || !G.slots) return [];
-    return G.slots.filter((x) => x.status === 'done').map((x) => ({ id: x.id, slot: x.i, sentence: x.sentence, topic: x.topic || '', comp: x.comp || '', struct: x.struct || '', verdict: x.status === 'done' ? 'correct' : 'pending', padletAt: x.padletAt || 0 }));
+    return G.slots.filter((x) => x.status === 'done').map((x) => ({ id: x.id, slot: x.i, sentence: x.sentence, topic: x.topic || '', comp: x.comp || '', struct: x.struct || '', gram: x.gram || '', verdict: x.status === 'done' ? 'correct' : 'pending', padletAt: x.padletAt || 0, imgN: x.imgN || 0, posterImg: x.posterImg || null }));
   }
 
   // 지금 열려 있는 회차의 기록인지(지난 회차의 문장은 보기만 하고 이어서 할 수 없다)
@@ -258,16 +259,17 @@
       basics,
       formOnly ? h('details', { class: 'pmore' }, h('summary', null, '더 자세히 꾸미고 싶다면 (선택)'), more) : more));
 
-    const make = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
+    const locked = !!box._locked;   // 이미지 만들기 횟수를 모두 썼으면 프롬프트를 볼 수만 있다
+    const make = h('button', { class: 'btn primary', type: 'button', disabled: locked || null, onclick: async () => {
       F.colorCustom = (F.colorCustom || '').trim();
       PS.out = { ko: P.build(F, 'ko'), en: P.build(F, 'en') };
       PS.lang = PS.lang || 'ko'; box._made = true;
       save(); redo();
       const o = document.getElementById('pp-out'); if (o) o.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       try { await api('/api/poster', { prompt: PS.out.ko, promptEn: PS.out.en, topic: F.topic, sentence: F.sentence, opts: F, recId: box._recId || undefined }); } catch (e) { /* 저장하지 못해도 프롬프트는 쓸 수 있다 */ }
-    } }, formOnly ? '프롬프트 만들기 →' : '프롬프트 만들기');
+    } }, locked ? '이미지 횟수를 모두 써서 만들 수 없어요' : formOnly ? '프롬프트 만들기 →' : '프롬프트 만들기');
     kids.push(ro ? h('div', { class: 'notice' }, '포스터 선택과 [프롬프트 만들기]는 모둠장이 해요. 모둠장이 만들면 선택한 내용이 여기에 나타나요.') : h('div', { class: 'actions' }, make,
-      h('button', { class: 'btn', type: 'button', onclick: () => { Object.assign(F, P.defaults(), { topic: F.topic, sentence: F.sentence }); PS.out = null; save(); redo(); } }, '선택 처음으로')));
+      locked ? null : h('button', { class: 'btn', type: 'button', onclick: () => { Object.assign(F, P.defaults(), { topic: F.topic, sentence: F.sentence }); PS.out = null; save(); redo(); } }, '선택 처음으로')));
 
     if (PS.out && !formOnly) {
       const lang = PS.lang === 'en' ? 'en' : 'ko';
@@ -315,16 +317,16 @@
   function eligibleSentences() {
     if (S.group) return groupSentences();
     const seen = new Set(), out = [];
-    const add = (id, sentence, topic, comp, struct, verdict) => {
+    const add = (id, sentence, topic, comp, struct, verdict, src, gram) => {
       const key = sentence + '|' + topic;
       if (!sentence || seen.has(key)) return;
-      seen.add(key); out.push({ id, sentence, topic: topic || '', comp: comp || '', struct: struct || '', verdict });
+      seen.add(key); out.push({ id, sentence, topic: topic || '', comp: comp || '', struct: struct || '', gram: gram || (src && src.gram) || '', verdict, imgN: (src && src.imgN) || 0, posterImg: (src && src.posterImg) || null });
     };
     if (S.last && S.last.sentence && S.last.verdict === 'correct' && S.challenge) {
       const c = S.challenge.conditions;
-      add(S.last.id, S.last.sentence, S.last.topic || c.topic.label, c.comp.label, c.struct.label, S.last.verdict);
+      add(S.last.id, S.last.sentence, S.last.topic || c.topic.label, c.comp.label, c.struct.label, S.last.verdict, S.history.find((x) => x.id === S.last.id), c.gram ? c.gram.label : '');
     }
-    for (const it of S.history) if (it.verdict === 'correct' && inRound(it)) add(it.id, it.sentence, it.topic, it.comp, it.struct, it.verdict);
+    for (const it of S.history) if (it.verdict === 'correct' && inRound(it)) add(it.id, it.sentence, it.topic, it.comp, it.struct, it.verdict, it);
     return out;
   }
 
@@ -346,7 +348,7 @@
     sel.addEventListener('change', () => { S.padPick = sents[parseInt(sel.value, 10)].id; drawPadlet(box); });
     const st = S.student;
     const text = window.Poster.fillTemplate(S.padletTemplate, {
-      '이름': st.name, '학번': st.sid, '반': st.cls, '광고문구': item.sentence, '성분조건': item.comp, '짜임조건': item.struct, '주제': item.topic,
+      '이름': st.name, '학번': st.sid, '반': st.cls, '광고문구': item.sentence, '성분조건': item.comp, '짜임조건': item.struct, '문법요소': item.gram || '', '주제': item.topic,
     });
     const ta = h('textarea', { id: 'pad-ta', rows: '6', readonly: true, 'aria-label': '패들렛에 올릴 글', style: 'font-size:.98rem;line-height:1.6' });
     ta.value = text;
@@ -427,12 +429,13 @@
     const hasAll = !!(S.padlet && S.padlet.all);
     const steps = [];
     const p2 = S.demo || !S.round || S.round.phase >= 2;   // 2차시가 열려야 포스터 단계가 나타난다
-    if (S.padlet.post) steps.push({ id: 'post', title: S.group ? '모둠 패들렛 방에 광고문구 올리기' : '내 패들렛에 광고문구 올리기', done: !!postedAt || roomShared });
+    const imgMode = !!(S.imageGen && S.posterOn);   // 이미지 만들기가 켜져 있으면 글 올리기·복사 단계는 건너뛴다
+    if (S.padlet.post && !(imgMode && p2)) steps.push({ id: 'post', title: S.group ? '모둠 패들렛 방에 광고문구 올리기' : '내 패들렛에 광고문구 올리기', done: !!postedAt || roomShared });
     if (p2 && S.posterOn) {
       steps.push({ id: 'make', title: '포스터 프롬프트 만들기', done: roomShared || (lead ? !!PS.out : !!outP) });
-      steps.push({ id: 'copy', title: lead ? '프롬프트 복사하기' : '프롬프트 확인하기', done: roomShared || (lead ? !!M.copied : !!outP) });
+      if (!imgMode) steps.push({ id: 'copy', title: lead ? '프롬프트 복사하기' : '프롬프트 확인하기', done: roomShared || (lead ? !!M.copied : !!outP) });
     }
-    if (p2) steps.push({ id: 'room', title: S.posterOn ? '패들렛 방에서 포스터 만들어 올리기' : '내 패들렛 방으로 가기', done: roomShared || (lead && !!PS.done) });
+    if (p2) steps.push({ id: 'room', title: imgMode ? '포스터 만들어 올리기' : S.posterOn ? '패들렛 방에서 포스터 만들어 올리기' : '내 패들렛 방으로 가기', done: roomShared || (lead && (!!PS.done || (imgMode && !!(item.posterImg && item.posterImg.posted && PS.out && item.posterImg.prompt === (PS.out.en || PS.out.ko || '').trim())))) });
     if (hasAll) steps.push({ id: 'others', title: p2 ? '다른 친구들 포스터 보기' : '다른 친구들이 올린 글 모두 보기', done: !!M.others });
     if (!steps.length) {
       return h('section', { class: 'card mission', id: 'mission' }, h('h2', null, '1차시 활동 완료'), h('div', { class: 'notice ok' }, '문장 만들기를 마쳤어요. 포스터 만들기는 2차시에 해요. 선생님이 2차시를 열면 여기에 나타나요.'));
@@ -444,7 +447,7 @@
     const lockedAt = (i) => steps.slice(0, i).some((x) => !x.done) && !(S.group && !lead && (steps[i].id === 'make' || steps[i].id === 'copy'));
 
     const card = h('section', { class: 'card mission', id: 'mission' });
-    const redraw = () => { const n = missionCard(); if (n) card.replaceWith(n); };
+    const redraw = () => { const n = missionCard(); const cur = document.getElementById('mission') || card; if (n && cur) cur.replaceWith(n); };   // 비동기 작업이 끝날 때는 이전 카드가 이미 교체됐으므로 지금 화면에 있는 카드를 찾아 바꾼다
     const go = (id) => { M.view = id; save(); redraw(); const el = document.getElementById('mission'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); };
     const next = () => { M.view = ''; save(); redraw(); const el = document.getElementById('mission'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
 
@@ -475,6 +478,7 @@
         box._formOnly = true;
         if (!lead) { box._readOnly = true; Object.assign(PS.form, P.defaults(), (slot && slot.poster && slot.poster.opts) || {}, { sentence: item.sentence, topic: (slot && slot.poster && slot.poster.opts && slot.poster.opts.topic) || item.topic || PS.form.topic }); }
         if (S.group && lead) box._recId = item.id;
+        box._locked = !!(imgMode && !S.demo && Math.max(item.imgN || 0, (IMGS[String(item.id)] || {}).n || 0) >= (S.imageMax || 2));
         box._redraw = () => { if (box._made && PS.out) { M.copied = false; M.view = ''; save(); redraw(); const el = document.getElementById('mission'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } else drawPoster(box); };
         drawPoster(box);
         return [h('p', { class: 'mhelp' }, lead ? '이미지를 만들어 주는 AI에게 줄 "그림 주문서(프롬프트)"를 만들어요. 내 문장은 포스터에 그대로 들어가요.' : (outP ? '모둠장이 고른 내용으로 프롬프트를 만들었어요.' : '모둠장이 고르는 중이에요. 같이 의논해 보세요. 모둠장이 [프롬프트 만들기]를 누르면 이 화면에 나타나요.')), box];
@@ -506,15 +510,94 @@
           ['"그리려는 내용 입력하기" 칸에 복사한 프롬프트를 붙여 넣고(Ctrl+V) ', '오른쪽 화살표(→)', '를 눌러요.'],
           ['만들어진 그림 중 마음에 드는 포스터를 골라 ', '올려요.', ''],
         ];
+        const imgBox = (() => {
+          if (!imgMode || !item.id) return null;
+          const key = String(item.id), mx = S.imageMax || 2;
+          const sv = item.posterImg || null;
+          const IM = (IMGS[key] = IMGS[key] || { n: 0, url: '', posted: false, busy: '', msg: '', warn: '' });
+          IM.n = Math.max(IM.n, item.imgN || 0);
+          if (sv && sv.url && (!IM.url || sv.at > (IM.at || 0))) { IM.url = sv.url; IM.at = sv.at; IM.used = sv.prompt || IM.used; }
+          if (sv && sv.posted && sv.url === IM.url) IM.posted = true;
+          const left = Math.max(0, mx - IM.n);
+          const pic = IM.url ? h('img', { src: IM.url, alt: '만들어진 포스터', style: 'max-width:100%;max-height:360px;margin-top:6px;border-radius:8px' }) : null;
+          if (!lead) return h('div', { class: 'notice' }, IM.url ? (IM.posted ? '모둠장이 만든 포스터가 패들렛에 올라갔어요.' : '모둠장이 포스터를 만드는 중이에요.') : '모둠장이 포스터를 만들면 여기에 나타나요.', pic);
+          const finish = async () => {
+            if (S.group && slot && !S.demo) { try { await api('/api/group/roomdone', { id: item.id }); slot.roomDone = Date.now(); } catch (e) { /* 모둠원 화면 완료 표시는 다음에 다시 */ } }
+            PS.done = true; M.view = 'room'; save();
+          };
+          const postIt = async () => {
+            IM.busy = 'post'; IM.warn = ''; redraw();
+            try { await api('/api/poster/image/post', { id: item.id }); IM.posted = true; IM.msg = '패들렛에 올렸어요!'; await finish(); }
+            catch (e) { IM.warn = (e.message || '') + ' [패들렛에 다시 올리기]를 눌러 주세요.'; }
+            IM.busy = ''; redraw();
+          };
+          const make = async () => {
+            if (S.demo) { IM.msg = '체험 모드에서는 이미지를 만들지 않아요.'; redraw(); return; }
+            IM.busy = 'make'; IM.msg = ''; IM.warn = ''; IM.posted = false; redraw();
+            const t0 = Date.now(); let settled = false;
+            const pull = async () => {   // 서버는 끝냈는데 응답이 안 돌아온 경우를 위해, 서버에 저장된 상태를 직접 읽는다
+              const me = await api('/api/me'); S.history = me.history;
+              if (me.group) S.group = me.group;
+              const r = S.group ? ((S.group.slots || []).find((x) => x.id === item.id) || {}) : ((S.history || []).find((x) => x.id === item.id) || {});
+              if (r.imgN) IM.n = Math.max(IM.n, r.imgN);
+              if (r.posterImg && r.posterImg.at >= t0 - 5000) { IM.url = r.posterImg.url; IM.at = r.posterImg.at; IM.posted = !!r.posterImg.posted; return true; }
+              return false;
+            };
+            const watcher = (async () => {
+              await new Promise((r) => setTimeout(r, 35000));
+              while (!settled && Date.now() - t0 < 120000) { try { if (await pull()) return true; } catch (e) { /* 다시 */ } await new Promise((r) => setTimeout(r, 4000)); }
+              return false;
+            })();
+            let ok = false;
+            try {
+              const o = await Promise.race([
+                api('/api/poster/image', { id: item.id, prompt: (PS.out.en || PS.out.ko || '').trim() }).then((x) => ({ x }), (e) => ({ e })),
+                watcher.then((f) => (f ? { found: true } : new Promise(() => {}))),
+              ]);
+              if (o.e) throw o.e;
+              if (o.x) { IM.n = Math.max(IM.n + 1, mx - o.x.left); IM.url = o.x.url; IM.at = Date.now(); IM.posted = false; IM.used = (PS.out.en || PS.out.ko || '').trim(); }
+              ok = true;
+            } catch (e) {
+              IM.warn = e.message;
+              try { await pull(); } catch (e2) { /* 그대로 둔다 */ }
+            }
+            settled = true; IM.busy = ''; redraw();
+            if (ok && IM.url && !IM.posted) await postIt();
+          };
+          const busy = !!IM.busy;
+          const needPost = IM.url && !IM.posted;
+          const curP = (PS.out.en || PS.out.ko || '').trim();
+          const edited = !IM.url || (IM.used !== undefined && IM.used !== curP);   // 프롬프트를 새로 만들었으면 그 프롬프트로 다시 만들 수 있다
+          const editPrompt = async () => {
+            if (S.group && slot && !S.demo) { try { await api('/api/group/roomdone', { id: item.id, undo: true }); } catch (e) { /* 화면만 먼저 돌아간다 */ } slot.roomDone = 0; }
+            PS.done = false; M.view = 'make'; save(); redraw();
+            const el = document.getElementById('mission'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          };
+          const badge = h('div', { style: `display:inline-block;margin:6px 0;padding:6px 14px;border-radius:999px;font-weight:700;font-size:1.05rem;${left < 1 ? 'background:#fde7e5;color:#b3261e' : left === 1 ? 'background:#fff3d6;color:#8a5a00' : 'background:#e1f0e6;color:#1d6b3c'}`, role: 'status' }, `🎟 남은 횟수 ${left} / ${mx}`);
+          return h('div', { class: 'notice' }, h('b', null, '🎨 프롬프트로 바로 포스터 만들기'),
+            h('div', null, badge),
+            h('p', { class: 'small', style: 'margin:4px 0' }, `한 문장당 ${mx}번까지 만들 수 있어요. 만든 그림은 자동으로 패들렛 방에 올라가요. 마음에 안 들면 프롬프트를 고쳐서 다시 만들어요.`),
+            h('div', { class: 'actions' },
+              needPost ? h('button', { class: 'btn primary', type: 'button', disabled: busy || null, onclick: postIt }, IM.busy === 'post' ? '패들렛에 올리는 중…' : '패들렛에 다시 올리기') : null,
+              edited || left < 1
+                ? h('button', { class: 'btn' + (needPost ? '' : ' primary'), type: 'button', disabled: busy || left < 1 || null, onclick: make }, IM.busy === 'make' ? '만드는 중… (10~30초)' : left < 1 ? '횟수를 모두 썼어요' : '이미지 만들어 올리기')
+                : h('button', { class: 'btn', type: 'button', disabled: busy || left < 1 || null, onclick: editPrompt }, '✏️ 프롬프트 수정하기')),
+            IM.msg && !IM.warn ? h('p', { class: 'small', role: 'status' }, IM.msg) : null, IM.warn ? h('p', { class: 'small', style: 'color:#b3261e', role: 'alert' }, IM.warn) : null, pic);
+        })();
+        const posted = !!(imgMode && ((IMGS[String(item.id)] || {}).posted || (item.posterImg && item.posterImg.posted)));
+        if (imgMode) {
+          const go2 = S.padlet.link ? h('a', { class: 'btn big' + (posted ? ' primary' : ''), href: posted ? S.padlet.link : null, target: '_blank', rel: 'noopener', 'aria-disabled': posted ? null : 'true', style: posted ? '' : 'opacity:.45;pointer-events:none', onclick: () => { M.opened = true; save(); } }, posted ? (S.padlet.board ? '패들렛 보드에서 확인하기 →' : '내 패들렛 방에서 확인하기 →') : '패들렛 가기 (그림이 올라가면 열려요)') : null;
+          return [imgBox, h('div', { class: 'actions' }, go2)];
+        }
         const needCopy = lead && S.posterOn && !M.copied && PS.out;
         const reCopy = needCopy ? h('div', { class: 'notice warn' }, '프롬프트를 아직 복사하지 않았어요. ', h('button', { class: 'btn sm', type: 'button', onclick: async () => { const ok = await copyText(PS.out[PS.lang === 'en' ? 'en' : 'ko'], document.createElement('textarea')); if (ok) { M.copied = true; save(); redraw(); } } }, '지금 복사하기')) : null;
         const adTa = !S.padlet.post && lead ? (() => {
           const st = S.student;
-          if (S.group) { const gp = window.Poster.groupPadlet({ no: S.group.no, names: S.group.members.map((m) => m.name), comp: item.comp, struct: item.struct, topic: item.topic, sentence: item.sentence }); return gp.subject + '\n\n' + gp.body; }
-          return window.Poster.fillTemplate(S.padletTemplate, { '이름': st.name, '학번': st.sid, '반': st.cls, '광고문구': item.sentence, '성분조건': item.comp, '짜임조건': item.struct, '주제': item.topic });
+          if (S.group) { const gp = window.Poster.groupPadlet({ no: S.group.no, names: S.group.members.map((m) => m.name), comp: item.comp, struct: item.struct, gram: item.gram || '', topic: item.topic, sentence: item.sentence }); return gp.subject + '\n\n' + gp.body; }
+          return window.Poster.fillTemplate(S.padletTemplate, { '이름': st.name, '학번': st.sid, '반': st.cls, '광고문구': item.sentence, '성분조건': item.comp, '짜임조건': item.struct, '문법요소': item.gram || '', '주제': item.topic });
         })() : '';
         const adBtn = !S.padlet.post && lead ? h('div', { class: 'notice' }, S.group ? '모둠 소개 글을 올리려면 ' : '글에 광고문구도 함께 적고 싶다면 ', h('button', { class: 'btn sm', type: 'button', onclick: async (ev) => { const ok = await copyText(adTa, document.createElement('textarea')); ev.target.textContent = ok ? '복사했어요 (본문에 붙여 넣기)' : '복사가 안 돼요'; } }, '광고 글 복사하기'), S.group ? ' 를 누르고 붙여 넣으세요. (첫 줄은 제목, 나머지는 본문이에요. 프롬프트를 붙여 넣은 뒤에 하세요)' : ' 를 누르고 본문에 붙여 넣으세요. (프롬프트를 붙여 넣은 뒤에 하세요)') : null;
-        return [reCopy, link || h('div', { class: 'notice warn' }, '내 패들렛 방 주소가 아직 등록되지 않았어요. 선생님이 안내한 패들렛 방으로 직접 이동해 주세요.'),
+        return [imgBox, reCopy, link || h('div', { class: 'notice warn' }, '내 패들렛 방 주소가 아직 등록되지 않았어요. 선생님이 안내한 패들렛 방으로 직접 이동해 주세요.'),
           h('ol', { class: 'mguide' }, guide.map((g) => h('li', null, g[0], h('b', null, g[1]), g[2]))), adBtn,
           lead ? h('div', { class: 'actions' }, h('button', { class: 'btn big' + (M.opened || !link ? ' primary' : ''), type: 'button', onclick: async () => {
             PS.done = true; save();
@@ -634,7 +717,7 @@
       const mine = S.group && S.mission && S.mission.pick === sl.i;
       list.append(h('li', { class: 'gslot ' + sl.status + (cur ? ' cur' : '') },
         h('div', { class: 'ghead' }, h('b', null, `문장 ${sl.i + 1}`), h('span', { class: 'pill ' + st[1] }, st[0]), cur ? h('span', { class: 'pill gray' }, '지금 쓰는 중') : null),
-        c ? h('div', { class: 'gconds small' }, h('span', null, c.comp.label), ' · ', h('span', null, c.struct.label), ' · ', h('span', null, '주제: ' + c.topic.label)) : null,
+        c ? h('div', { class: 'gconds small' }, [c.comp.label, c.struct.label, c.gram ? c.gram.label : ''].filter(Boolean).map((x, i) => [i ? ' · ' : '', h('span', null, x)]).flat().concat([' · ', h('span', null, (c.topic.cat === 'daily' ? '상황: ' : '주제: ') + c.topic.label)])) : null,
         noteBox(sl),
         sl.status === 'todo' && !G.isLeader ? h('div', { class: 'muted small' }, sl.tries ? `모둠이 ${sl.tries}번 도전했어요 · 모둠장이 입력하는 중이에요` : '모둠장이 입력할 차례를 기다려요') : sl.status === 'todo' ? h('div', { class: 'actions' }, h('button', { class: 'btn' + (cur ? '' : ' primary'), type: 'button', disabled: S.busy || cur, onclick: () => startSlot(sl.i) }, cur ? '아래에서 쓰는 중' : (sl.tries ? '이어서 도전하기' : '이 문장 쓰기 →')),
           sl.tries ? h('span', { class: 'muted small' }, `모둠이 ${sl.tries}번 도전했어요`) : null) : h('div', null,
@@ -668,7 +751,7 @@
     await refreshGroup();
     if (!S.group) { render(); return; }
     if (S.group.no && !S.group.isLeader && S.challenge) { S.challenge = null; S.last = null; S.draft = ''; save(); gSig = ''; render(); }
-    const sig = JSON.stringify([S.group.no, S.group.isLeader, S.group.members, S.group.slots.map((x) => [x.status, x.sentence, x.padletAt, x.tries, x.poster && x.poster.at, x.roomDone, (x.notes || []).length])]);
+    const sig = JSON.stringify([S.group.no, S.group.isLeader, S.group.members, S.group.slots.map((x) => [x.status, x.sentence, x.padletAt, x.tries, x.poster && x.poster.at, x.posterImg && x.posterImg.at, x.posterImg && x.posterImg.posted, x.roomDone, (x.notes || []).length])]);
     if (sig === gSig) return;
     { const ae = document.activeElement, g0 = document.getElementById('group'); if (ae && ae.tagName === 'TEXTAREA' && g0 && g0.contains(ae)) return; }   // 연습장에 적는 중이면 다음에 갱신
     gSig = sig;
@@ -680,6 +763,7 @@
 
   // ---------- 메인 화면 ----------
   function condRow(kind, c, cls) {
+    if (!c || c.none) return null;   // 문법 요소형 문제에서 쓰지 않는 조건 줄
     return h('div', { class: 'cond ' + (cls || '') },
       h('div', { class: 'kind' }, kind),
       h('div', null,
@@ -688,25 +772,34 @@
         c.example ? h('details', null, h('summary', null, '보기'), h('div', { class: 'ex' }, c.example)) : null));
   }
 
+  // 이번 문제의 조건 개수(문법 조건 + 주제·상황)를 우리말로
+  function condCountWord(c) {
+    const k = c.conditions || {};
+    const n = (k.comp && !k.comp.none ? 1 : 0) + (k.struct && !k.struct.none ? 1 : 0) + (k.gram ? 1 : 0) + 1;
+    return ['', '한 가지', '두', '세', '네', '다섯'][n] || n + '가지';
+  }
+
   // 주제 줄: 선생님이 허용하면 기존 주제 목록에서 다른 주제를 고를 수 있다(직접 입력은 없다).
   function topicRow(c) {
     const base = c.conditions.topic;
-    if (!c.topicChoice || S.last) return condRow('공익광고 주제', S.topicText ? { label: S.topicText } : base, 'topic');
+    const kindOf = (label) => { const cat = label && c.topicCats && c.topicCats[label] ? c.topicCats[label] : (label ? 'ad' : base.cat); return cat === 'daily' ? '일상 언어 상황' : '공익광고 주제'; };
+    if (!c.topicChoice || S.last) return condRow(kindOf(S.topicText), S.topicText ? { label: S.topicText } : base, 'topic');
     const nameEl = h('div', { class: 'name' }, S.topicText || base.label);
-    const tag = h('span', { class: 'pill gray', style: 'margin-left:8px' }, '내가 고른 주제');
-    const sync = () => { nameEl.textContent = S.topicText || base.label; tag.style.display = S.topicText ? '' : 'none'; };
-    const sel = h('select', { id: 'tsel', 'aria-label': '다른 주제 고르기' }, h('option', { value: '' }, `처음 주제: ${base.label}`));
+    const kindEl = h('div', { class: 'kind' }, kindOf(S.topicText));
+    const tag = h('span', { class: 'pill gray', style: 'margin-left:8px' }, '내가 고른 것');
+    const sync = () => { nameEl.textContent = S.topicText || base.label; kindEl.textContent = kindOf(S.topicText); tag.style.display = S.topicText ? '' : 'none'; };
+    const sel = h('select', { id: 'tsel', 'aria-label': '다른 주제·상황 고르기' }, h('option', { value: '' }, `처음 것: ${base.label}`));
     for (const t of c.topicList || []) if (t !== base.label) sel.append(h('option', { value: t }, t));
     sel.value = S.topicText && (c.topicList || []).includes(S.topicText) ? S.topicText : '';
     sel.addEventListener('change', () => { S.topicText = sel.value; sync(); save(); });
     sync();
     return h('div', { class: 'cond topic' },
-      h('div', { class: 'kind' }, '공익광고 주제'),
+      kindEl,
       h('div', null, h('div', { style: 'display:flex;align-items:center;flex-wrap:wrap' }, nameEl, tag),
         h('details', { open: S.topicText ? '' : null },
-          h('summary', null, '다른 주제로 바꾸기'),
+          h('summary', null, '다른 주제·상황으로 바꾸기'),
           h('div', { class: 'ex', style: 'display:grid;gap:6px;margin-top:6px' }, sel,
-            h('div', { class: 'muted small' }, '주제는 AI가 채점하지 않고 선생님이 확인해요.')))));
+            h('div', { class: 'muted small' }, '주제·상황은 AI가 채점하지 않고 선생님이 확인해요.')))));
   }
 
   function sentenceView(text, wheres) {
@@ -734,7 +827,7 @@
   }
 
   const CHECK_NAMES = {
-    component: '문장 성분 조건', structure: '문장의 짜임 조건', wellformed: '완결된 한 문장',
+    component: '문장 성분 조건', structure: '문장의 짜임 조건', grammar: '문법 요소 조건', wellformed: '완결된 한 문장',
   };
 
   function teacherBits(r) {
@@ -766,7 +859,7 @@
 
     if (r.checks) {
       const list = h('ul', { class: 'checks' });
-      for (const k of ['component', 'structure', 'wellformed']) {
+      for (const k of ['component', 'structure', 'grammar', 'wellformed']) {
         const c = r.checks[k];
         if (!c) continue;
         const row = h('li', { class: 'check ' + (c.ok ? 'ok' : 'no') },
@@ -869,7 +962,7 @@
       list.append(h('div', { class: 'it' },
         h('div', { class: 'meta' }, h('span', { class: 'pill ' + v[1] }, v[0]),
           new Date(it.ts).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
-          (it.gno ? `${it.gno}모둠${it.by ? ' · ' + it.by + ' 입력' : ''} · ` : '') + it.comp + ' · ' + it.struct + ' · ' + it.topic),
+          (it.gno ? `${it.gno}모둠${it.by ? ' · ' + it.by + ' 입력' : ''} · ` : '') + [it.comp, it.struct, it.gram, it.topic].filter(Boolean).join(' · ')),
         h('div', { class: 's' }, it.sentence),
         it.poster ? h('details', { class: 'block' }, h('summary', null, '포스터 프롬프트 보기'), h('div', { style: 'white-space:pre-wrap;margin-top:6px' }, it.poster.prompt)) : null,
         it.tfeedback ? h('div', { class: 'block tfb' }, h('div', { class: 'ttl' }, '선생님 피드백'), h('div', { style: 'white-space:pre-wrap' }, it.tfeedback)) : null));
@@ -884,7 +977,7 @@
 
   function renderMain() {
     const c = S.challenge;
-    const pad = h('textarea', { id: 'pad', class: 'pad', rows: '4', maxlength: '200', 'aria-label': '내 문장', placeholder: '세 조건을 모두 만족하는 문장을 한 문장으로 써 보세요.' });
+    const pad = h('textarea', { id: 'pad', class: 'pad', rows: '4', maxlength: '200', 'aria-label': '내 문장', placeholder: '조건을 모두 만족하는 문장을 한 문장으로 써 보세요.' });
     pad.value = S.draft;
     const count = h('span', { class: 'muted small' }, `${S.draft.length} / 200자`);
     const btn = h('button', { class: 'btn primary', type: 'button', disabled: S.busy || !S.draft.trim(), onclick: submit }, S.busy ? '살펴보는 중…' : '제출하기');
@@ -921,8 +1014,9 @@
         h('div', { class: 'conds' },
           condRow('문장 성분', c.conditions.comp),
           condRow('문장의 짜임', c.conditions.struct),
+          c.conditions.gram ? condRow('문법 요소 · ' + (c.conditions.gram.cat || ''), c.conditions.gram) : null,
           topicRow(c)),
-        h('p', { class: 'muted small', style: 'margin-top:12px' }, '세 조건을 모두 만족하는 문장 한 개를 써서 제출하세요.'), h('p', { class: 'sig', style: 'text-align:right;margin-top:6px' }, '- A.N. -')));
+        h('p', { class: 'muted small', style: 'margin-top:12px' }, `${condCountWord(c)} 조건을 모두 만족하는 문장 한 개를 써서 제출하세요.`), h('p', { class: 'sig', style: 'text-align:right;margin-top:6px' }, '- A.N. -')));
       nodes.push(h('section', { class: 'card' },
         h('h2', null, '내 문장'), pad,
         h('div', { class: 'compose-foot' }, count, btn)));

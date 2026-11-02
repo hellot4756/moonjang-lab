@@ -6,7 +6,13 @@
   const MAX = 2;
   const STU = { sid: '90101', name: '시연 학생', cls: '시연반', no: 1 };
   const RD = { id: 'r-demo', no: 1, name: '시연', openedAt: Date.now(), closedAt: 0, groupMode: false, split: false, phase: 2 };
-  const view = (c, s, t, tl) => ({ comp: c, struct: s, topic: { id: t, label: tl } });
+  const NONE = { id: '-', none: true, label: '', short: '', example: '' };
+  const DAILY = ['선생님께 쪽지나 편지 쓰기', '친구와 약속 정하기', '선생님께 부탁하기'];
+  const view = (c, s, t, tl, g) => ({ comp: c, struct: s, topic: { id: t, label: tl, cat: DAILY.includes(tl) ? 'daily' : 'ad' }, gram: g || null });
+  const GRAM = {
+    honSubj: { id: 'g-hon-subj', level: 'easy', cat: '높임 표현', label: '주체 높임 (-(으)시- + 께서)', short: "문장의 주어를 높이도록 '께서'와 '-(으)시-'를 쓰세요.", example: '선생님께서 벌써 도착하셨다.' },
+    negMot: { id: 'g-neg-mot', level: 'easy', cat: '부정 표현', label: "'못' 부정문", short: "'못'(또는 '-지 못하다')으로 능력이 부족하거나 외부 원인 때문에 할 수 없음을 나타내세요.", example: '나는 그를 못 만났다. / 나는 그를 만나지 못했다.' },
+  };
   // 조건 보기(실제 문장 연습실의 조건 문구와 같다)
   const COMP = {
     adv: { id: 'adv', level: 'easy', label: '부사어가 있는 문장', short: '용언(서술어)이나 다른 말을 꾸며 주는 부사어를 넣어 쓰세요.', example: '꽃이 활짝 핀다. (활짝 = 부사어)' },
@@ -40,8 +46,22 @@
       badRes: { checks: { component: no('체언을 꾸며 주는 관형어가 보이지 않아요.', '전등을', "'불필요한 전등', '모든 전등'처럼 체언 앞에 꾸미는 말을 넣어 보세요."), structure: no("'-고'는 두 절을 대등하게 잇는 어미라서 종속적 이어짐이 아니에요.", '끄고', "'-(으)면'이나 '-아서'처럼 종속적으로 잇는 어미로 바꿔 보세요."), wellformed: ok('완결된 한 문장이에요.') },
         analysis: '[전등을 끄고] + [에너지를 아껴요]\n앞 절: 목적어 전등을 / 서술어 끄고\n뒤 절: 목적어 에너지를 / 서술어 아껴요', tip: "'-고'는 대등한 이어짐, '-(으)면'은 종속적 이어짐이에요.", example: '' } },
   ];
+  CH.push(
+    { v: view(NONE, STRUCT.simple, 'd20', '선생님께 쪽지나 편지 쓰기', GRAM.honSubj),
+      good: ['선생님께서 저에게 좋은 말씀을 해 주셨습니다.'], bad: '선생님이 저에게 좋은 말씀을 해 줬어요.',
+      goodRes: { checks: { structure: ok('주어(선생님께서)와 서술어(해 주셨습니다)의 관계가 한 번만 나타나는 홑문장이에요.'), grammar: ok("주격 조사 '께서'와 선어말 어미 '-(으)시-'(주셨)로 주어인 선생님을 높였어요."), wellformed: ok('주어와 서술어를 갖춘 완결된 한 문장이에요.') },
+        analysis: '선생님께서(주어) / 저에게(부사어) / 좋은(관형어) 말씀을(목적어) / 해 주셨습니다(서술어, -시- 사용)', tip: "주체 높임은 '께서'와 '-(으)시-'가 짝을 이루는 경우가 많아요. 청자를 높이는 '-ㅂ니다'는 상대 높임이라 따로 구별해 보세요.", example: '할아버지께서는 신문을 읽고 계십니다.' },
+      badRes: { checks: { structure: ok('주어와 서술어의 관계가 한 번만 나타나는 홑문장이에요.'), grammar: no("선생님을 높이는 '-(으)시-'와 '께서'가 쓰이지 않았어요. '-어요'는 듣는 사람을 높이는 상대 높임이에요.", '선생님이', "주어 '선생님'을 높이도록 조사와 서술어를 바꿔 보세요."), wellformed: ok('완결된 한 문장이에요.') },
+        analysis: '선생님이(주어) / 저에게(부사어) / 좋은(관형어) 말씀을(목적어) / 해 줬어요(서술어)', tip: "상대 높임('-어요')과 주체 높임('-시-')은 서로 달라요.", example: '' } },
+    { v: view(COMP.obj, NONE, 'd5', '친구와 약속 정하기', GRAM.negMot),
+      good: ['나는 오늘 약속 시간을 지키지 못했어.'], bad: '나는 오늘 약속 시간을 안 지켰어.',
+      goodRes: { checks: { component: ok("'약속 시간을'이 서술어 '지키지 못했어'의 대상이 되는 목적어예요."), grammar: ok("'-지 못하다'(긴 부정문)로 능력·외부 원인 때문에 하지 못했음을 나타냈어요."), wellformed: ok('주어와 서술어를 갖춘 완결된 한 문장이에요.') },
+        analysis: '나는(주어) / 오늘(부사어) / 약속 시간을(목적어) / 지키지 못했어(서술어, 긴 부정문 \'못\')', tip: "'안'은 단순·의지 부정, '못'은 능력·외부 원인에 의한 부정이에요.", example: '나는 어제 숙제를 끝내지 못했다.' },
+      badRes: { checks: { component: ok("'약속 시간을'이 목적어예요."), grammar: no("'안'은 단순하거나 의지에 따른 부정이에요. 할 수 없었다는 '못' 부정이 아니에요.", '안 지켰어', "능력이나 외부 원인 때문에 할 수 없었다는 뜻이 드러나게 바꿔 보세요."), wellformed: ok('완결된 한 문장이에요.') },
+        analysis: '나는(주어) / 오늘(부사어) / 약속 시간을(목적어) / 안 지켰어(서술어, 짧은 부정문 \'안\')', tip: "'못'은 보통 동사에만 써요.", example: '' } });
   const norm = (t) => String(t || '').replace(/[\s.!?,]/g, '');
-  const TOPICS = ['플라스틱 사용 줄이기', '분리배출 실천', '음식물 쓰레기 줄이기', '에너지 절약', '물 절약', '횡단보도 교통안전', '안전벨트 착용', '학교폭력 예방'];
+  const TOPICS = ['플라스틱 사용 줄이기', '분리배출 실천', '음식물 쓰레기 줄이기', '에너지 절약', '물 절약', '횡단보도 교통안전', '안전벨트 착용', '학교폭력 예방'].concat(DAILY);
+  const TCATS = Object.fromEntries(DAILY.map((x) => [x, 'daily']).concat(TOPICS.filter((x) => !DAILY.includes(x)).map((x) => [x, 'ad'])));
   const st = { next: 0, cur: 0, tries: {}, hist: [], n: 0 };
   const j = (body, status) => new Response(JSON.stringify(body), { status: status || 200, headers: { 'content-type': 'application/json' } });
   const recOf = (id) => st.hist.find((x) => x.id === id);
@@ -53,11 +73,11 @@
       case '/api/login': return j({ token: 'demo', student: STU });
       case '/api/me': return j({
         student: STU, stats: { tries: st.hist.length, correct: st.hist.filter((x) => x.verdict === 'correct').length }, history: publicHist(),
-        round: RD, open: true, poster: true, imageGen: true, imageMax: MAX, topicChoice: true, topicList: TOPICS, padletTemplate: '',
+        round: RD, open: true, poster: true, imageGen: true, imageMax: MAX, topicChoice: true, topicList: TOPICS, topicCats: TCATS, padletTemplate: '',
         padlet: { post: true, link: '', board: false }, group: null, demo: false });
       case '/api/challenge': {
         st.cur = st.next % CH.length; st.next++; notify();
-        return j({ token: 'c' + st.cur, conditions: CH[st.cur].v, topicChoice: true, topicList: TOPICS });
+        return j({ token: 'c' + st.cur, conditions: CH[st.cur].v, topicChoice: true, topicList: TOPICS, topicCats: TCATS });
       }
       case '/api/typing': case '/api/flag': return j({ ok: true });
       case '/api/submit': {
@@ -71,7 +91,7 @@
             message: '시연판에서는 AI 판정을 하지 않아요. 아래 [정답 예시 넣기]·[오답 예시 넣기]를 눌러 판정 화면을 체험해 보세요.' });
         }
         const r = isGood ? c.goodRes : c.badRes; const id = 'demo-' + (++st.n);
-        if (isGood) st.hist.push({ id, ts: Date.now(), attempt: a, sentence, rd: RD.id, rdName: RD.name, verdict: 'correct', flagged: false, by: '', gno: 0, tfeedback: '', tfeedbackAt: 0, padletAt: 0, poster: null, imgN: 0, posterImg: null, comp: c.v.comp.label, struct: c.v.struct.label, topic: body.topicText || c.v.topic.label });
+        if (isGood) st.hist.push({ id, ts: Date.now(), attempt: a, sentence, rd: RD.id, rdName: RD.name, verdict: 'correct', flagged: false, by: '', gno: 0, tfeedback: '', tfeedbackAt: 0, padletAt: 0, poster: null, imgN: 0, posterImg: null, comp: c.v.comp.label, struct: c.v.struct.label, gram: c.v.gram ? c.v.gram.label : '', topic: body.topicText || c.v.topic.label });
         return j({ id, attempt: a, topic: body.topicText || c.v.topic.label, verdict: isGood ? 'correct' : 'incorrect', checks: r.checks, analysis: r.analysis, tip: r.tip, example: isGood || a >= 3 ? r.example : '', manual: false, message: '' });
       }
       case '/api/poster': return j({ id: 'demo' });

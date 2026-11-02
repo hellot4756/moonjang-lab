@@ -168,22 +168,22 @@
   }
 
   // ---------- 패들렛에 올릴 글 양식 ----------
-  // {이름} {광고문구} {문법조건} {성분조건} {짜임조건} {주제} {학번} {반} 자리에 학생의 내용이 들어간다.
+  // {이름} {광고문구} {문법조건} {성분조건} {짜임조건} {문법요소} {주제} {학번} {반} 자리에 학생의 내용이 들어간다.
   const DEFAULT_PADLET = '광고문구: {광고문구}\n문법 조건: {문법조건}\n주제: {주제}';
-  const PADLET_TOKENS = ['이름', '광고문구', '문법조건', '성분조건', '짜임조건', '주제', '학번', '반'];
+  const PADLET_TOKENS = ['이름', '광고문구', '문법조건', '성분조건', '짜임조건', '문법요소', '주제', '학번', '반'];
 
   function fillTemplate(tpl, vals) {
     const t = (typeof tpl === 'string' && tpl.trim()) ? tpl : DEFAULT_PADLET;
     const v = Object.assign({}, vals || {});
-    if (v['문법조건'] == null) v['문법조건'] = [v['성분조건'], v['짜임조건']].filter(Boolean).join(' + ');
-    return t.replace(/\{(이름|광고문구|문법조건|성분조건|짜임조건|주제|학번|반)\}/g, (m, k) => (v[k] == null ? '' : String(v[k]).replace(/\s+/g, ' ').trim()))
+    if (v['문법조건'] == null) v['문법조건'] = [v['성분조건'], v['짜임조건'], v['문법요소']].filter(Boolean).join(' + ');
+    return t.replace(/\{(이름|광고문구|문법조건|성분조건|짜임조건|문법요소|주제|학번|반)\}/g, (m, k) => (v[k] == null ? '' : String(v[k]).replace(/\s+/g, ' ').trim()))
       .replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
   }
 
   // 모둠 활동 패들렛 글: 제목 = 광고문구, 본문 = 모둠·모둠원 / 문법 조건 / 주제
   function groupPadlet(v) {
     const one = (x) => String(x == null ? '' : x).replace(/\s+/g, ' ').trim();
-    const cond = [one(v.comp), one(v.struct)].filter(Boolean).join(' + ');
+    const cond = [one(v.comp), one(v.struct), one(v.gram)].filter(Boolean).join(' + ');
     return {
       subject: one(v.sentence),
       body: `-${v.no}모둠: ${(v.names || []).map(one).filter(Boolean).join(', ')}\n-문법 조건: ${cond}\n-주제: ${one(v.topic)}`,

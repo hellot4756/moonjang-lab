@@ -44,7 +44,7 @@ function __def(name, fn) {
 
 parts = [PRELUDE]
 for name, file in [('padlet', 'lib/padlet.js'), ('images', 'lib/images.js'), ('poster', 'public/poster.js'), ('store', 'lib/store.js'),
-                   ('grader', 'lib/grader.js'), ('conditions', 'lib/conditions.js'), ('store-edge', 'edge/store-edge.js')]:
+                   ('grader', 'lib/grader.js'), ('grams', 'lib/grams.js'), ('conditions', 'lib/conditions.js'), ('store-edge', 'edge/store-edge.js')]:
     src = rd(file)
     # 모듈 안에서 쓰는 process 환경변수 접근은 위 대체품을 쓴다.
     parts.append('__def(%r, function (module, exports, require, process, Buffer) {\n%s\n});\n' % (name, src))

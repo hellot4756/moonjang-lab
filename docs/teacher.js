@@ -19,6 +19,8 @@
     return el;
   }
 
+  const GRAM_CATS = ['종결 표현', '높임 표현', '시간 표현', '피동·사동 표현', '부정 표현', '인용 표현'];
+
   const T = {
     token: '', info: null, tab: 'status', cls: '', period: 'all', verdict: '', auto: true,
     timer: null, boardF: '', seatEdit: false, conds: null, drawer: null, dirty: false, topicF: '', rd: '', fbF: '', fbDirty: false, gnoF: '', rd: '',
@@ -72,7 +74,7 @@
 
   const fmt = (ts) => ts ? new Date(ts).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '-';
   const VERDICT = { correct: ['문법 정답', 'ok'], incorrect: ['문법 오답', 'bad'], pending: ['판정 대기', 'warn'] };
-  const CHECK_NAMES = { component: '문장 성분', structure: '문장의 짜임', topic: '공익광고 주제', wellformed: '완결된 한 문장' };
+  const CHECK_NAMES = { component: '문장 성분', structure: '문장의 짜임', grammar: '문법 요소', topic: '주제·상황', wellformed: '완결된 한 문장' };
   const VERDICT_SHORT = { correct: '문법 정답', incorrect: '문법 오답', pending: '판정 대기' };
   const QUICK_FB = ['잘 썼어요!', '주제와 더 가깝게 써 보세요.', '문장이 길어요. 간결하게 줄여 보세요.', '띄어쓰기·맞춤법을 확인해 보세요.'];
 
@@ -441,7 +443,7 @@
       r.gno ? h('span', { class: 'pill blue' }, `${r.gno}모둠`) : null,
       h('b', null, `${r.cls} ${r.name}`), h('span', { class: 'muted small' }, `${r.sid} · ${fmt(r.ts)} · ${r.attempt}번째`));
     const card = h('div', { class: 'card rec' }, head,
-      h('div', { class: 'conds-line' }, `성분: ${r.compLabel} / 짜임: ${r.structLabel} / 주제: ${r.topicLabel}${r.topicCustom ? ' (학생이 고름)' : ''}`));
+      h('div', { class: 'conds-line' }, [r.compLabel ? `성분: ${r.compLabel}` : '', r.structLabel ? `짜임: ${r.structLabel}` : '', r.gramLabel ? `문법 요소: ${r.gramLabel}` : '', `주제·상황: ${r.topicLabel}${r.topicCustom ? ' (학생이 고름)' : ''}`].filter(Boolean).join(' / ')));
     if (r.tfeedback) card.querySelector('.head').append(h('span', { class: 'pill blue' }, '피드백 있음'));
     const fails = r.checks ? Object.entries(r.checks).filter(([, c]) => !c.ok) : [];
     card.append(highlight(r.sentence, fails.map(([, c]) => c.where)));
@@ -534,7 +536,7 @@
               m.typing ? h('span', { class: 'muted small' }, `입력 중 ${m.draftLen}자`) : null))),
             h('details', { class: 'small' }, h('summary', null, '문장·아이디어 보기' + (g.slots.some((x) => (x.notes || []).length) ? ` (연습장 ${g.slots.reduce((n, x) => n + (x.notes || []).length, 0)}개)` : '')),
               g.slots.map((x) => h('div', { class: 'gbslot ' + x.status },
-                h('b', null, `문장 ${x.i + 1}`), ' ', h('span', { class: 'muted' }, `${x.struct || ''} · ${x.topic || ''}`),
+                h('b', null, `문장 ${x.i + 1}`), ' ', h('span', { class: 'muted' }, `${[x.struct, x.gram].filter(Boolean).join(' + ')} · ${x.topic || ''}`),
                 x.status === 'todo' ? h('div', { class: 'muted' }, x.tries ? `아직 (도전 ${x.tries}번)` : '아직') : h('div', { style: 'font-family:var(--serif)' }, x.sentence, h('span', { class: 'muted small' }, `  — ${x.by}`), x.status === 'pending' ? h('span', { class: 'pill warn' }, '확인 중') : null, x.padletAt ? h('span', { class: 'pill gray' }, '패들렛 올림') : null),
                 (x.notes || []).length ? h('div', { class: 'gbnotes small', style: 'order:9;margin-top:4px;padding-left:8px;border-left:3px solid var(--line)' }, h('b', null, '아이디어 연습장'), ...x.notes.map((n) => h('div', null, h('b', null, n.name), ' ', n.text, h('span', { class: 'muted' }, '  ' + new Date(n.ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }))))) : null))),
             h('div', { class: 'toolbar' }, h('button', { class: 'btn sm', type: 'button', onclick: () => { T.gnoF = String(g.no); T.tab = 'records'; renderShell(); } }, '이 모둠 제출 보기')));
@@ -817,6 +819,8 @@
 
       const inName = h('input', { type: 'text', maxlength: '60', value: it.label });
       inName.addEventListener('input', () => { it.label = inName.value; title.textContent = it.label || '(이름 없음)'; markDirty(); });
+      const inCat = kind === 'grams' ? h('select', null, ...GRAM_CATS.map((c) => h('option', { value: c }, c))) : null;
+      if (inCat) { inCat.value = GRAM_CATS.includes(it.cat) ? it.cat : GRAM_CATS[0]; it.cat = inCat.value; inCat.addEventListener('change', () => { it.cat = inCat.value; markDirty(); }); }
       const inLevel = h('select', null, h('option', { value: 'easy' }, '쉬움'), h('option', { value: 'basic' }, '기본'));
       inLevel.value = it.level;
       inLevel.addEventListener('change', () => { it.level = inLevel.value; sum.firstChild.replaceWith(lvPill()); markDirty(); });
@@ -835,6 +839,7 @@
 
       det.append(h('div', { class: 'wrap cform', style: 'max-width:none' },
         field('조건 이름 (학생에게 크게 보여요)', inName),
+        inCat ? field('문법 요소 갈래', inCat) : null,
         field('난이도', inLevel, '난이도 설정(쉬움/기본/섞어서)에 따라 이 구분으로 뽑아요.'),
         field('학생에게 보여 줄 안내 문장', inShort, "예: 목적어(~을/~를)를 넣어 쓰세요."),
         field('예시 (정답 공개 전에도 학생에게 보여요)', inEx, '예: 나는 밥을 먹었다. (밥을 = 목적어)'),
@@ -892,7 +897,7 @@
       const list = h('div', { class: 'clist' });
       for (const it of D[kind]) list.append(item(kind, it));
       const add = h('button', { class: 'btn', type: 'button', onclick: () => {
-        D[kind].push({ id: '', level: 'easy', label: '', short: '', example: '', rubric: '' });
+        D[kind].push(Object.assign({ id: '', level: 'easy', label: '', short: '', example: '', rubric: '' }, kind === 'grams' ? { cat: GRAM_CATS[0] } : {}));
         markDirty(); render(); const all = box.querySelectorAll(`[data-kind=${kind}] details.citem`); const last = all[all.length - 1]; if (last) { last.open = true; last.querySelector('input').focus(); }
       } }, '+ 조건 추가');
       const n = D[kind].filter((x) => !x.off).length;
@@ -900,32 +905,34 @@
         h('p', { class: 'muted small', style: 'margin-bottom:12px' }, desc), list, h('div', { style: 'margin-top:12px' }, add));
     }
 
-    function topics() {
+    function topics(cat, name, desc, bulkHint) {
+      const isDaily = cat === 'daily';
+      const mine = D.topics.filter((x) => (x.cat === 'daily') === isDaily);
       const list = h('div', { class: 'tlist' });
-      for (const it of D.topics) {
+      for (const it of mine) {
         const on = h('input', { type: 'checkbox', 'aria-label': '출제하기' }); on.checked = !it.off;
-        const inp = h('input', { type: 'text', maxlength: '40', value: it.label, 'aria-label': '주제 이름' });
+        const inp = h('input', { type: 'text', maxlength: '40', value: it.label, 'aria-label': name + ' 이름' });
         on.addEventListener('change', () => { it.off = !on.checked; inp.classList.toggle('off', it.off); markDirty(); });
         inp.addEventListener('input', () => { it.label = inp.value; markDirty(); });
         if (it.off) inp.classList.add('off');
         const del = h('button', { class: 'btn sm', type: 'button', 'aria-label': '지우기', onclick: () => { D.topics = D.topics.filter((x) => x !== it); markDirty(); render(); } }, '×');
         list.append(h('div', { class: 'trow' }, on, inp, del));
       }
-      const bulk = h('textarea', { rows: '4', placeholder: '여러 주제를 한꺼번에 추가하려면 한 줄에 하나씩 붙여 넣으세요.\n예)\n시험 부정행위 근절\n학교 급식 잔반 줄이기' });
+      const bulk = h('textarea', { rows: '4', placeholder: bulkHint });
       const addBulk = h('button', { class: 'btn', type: 'button', onclick: () => {
         const have = new Set(D.topics.map((x) => x.label));
         let added = 0;
         for (const line of bulk.value.split(/\r?\n/)) {
           const label = line.replace(/^[\s\-•·\d.)]+/, '').trim().slice(0, 40);
           if (!label || have.has(label)) continue;
-          have.add(label); D.topics.push({ id: '', label }); added++;
+          have.add(label); D.topics.push({ id: '', label, cat: isDaily ? 'daily' : 'ad' }); added++;
         }
-        if (!added) { toast('추가할 새 주제가 없어요.', true); return; }
+        if (!added) { toast('추가할 새 항목이 없어요.', true); return; }
         markDirty(); render(); toast(`${added}개를 추가했어요. [저장]을 눌러야 반영돼요.`);
       } }, '추가');
-      const n = D.topics.filter((x) => !x.off).length;
-      return h('section', { class: 'card', 'data-kind': 'topics' }, h('h2', null, '공익광고 주제 ', h('span', { class: 'pill gray' }, `켜진 것 ${n}개 / 전체 ${D.topics.length}개`)),
-        h('p', { class: 'muted small', style: 'margin-bottom:12px' }, '체크한 주제만 학생에게 출제돼요. 이름을 눌러 바로 고칠 수 있어요.'),
+      const n = mine.filter((x) => !x.off).length;
+      return h('section', { class: 'card', 'data-kind': 'topics-' + cat }, h('h2', null, name, ' ', h('span', { class: 'pill gray' }, `켜진 것 ${n}개 / 전체 ${mine.length}개`)),
+        h('p', { class: 'muted small', style: 'margin-bottom:12px' }, desc),
         list, h('div', { class: 'wrap', style: 'max-width:640px;margin-top:12px' }, bulk, h('div', null, addBulk)));
     }
 
@@ -938,13 +945,15 @@
       } }, '기본 조건으로 되돌리기');
       box.replaceChildren(...[
         h('section', { class: 'card' }, h('h2', null, '조건 관리'),
-          h('p', { class: 'muted', style: 'margin-bottom:12px' }, '문장 성분 조건(출제 방식과 개수), 문장의 짜임 조건, 공익광고 주제를 정할 수 있어요. 학생에게는 켜 둔 조건 중에서 무작위로 나가요.'),
+          h('p', { class: 'muted', style: 'margin-bottom:12px' }, '문장 성분 조건(출제 방식과 개수), 문장의 짜임 조건, 문법 요소 조건, 공익광고 주제와 일상 언어 상황을 정할 수 있어요. 학생에게는 켜 둔 조건 중에서 무작위로 나가요.'),
           bar, h('div', { class: 'toolbar', style: 'margin-top:12px' }, mkSave(), reset,
             T.info.conditionsCustomized ? h('span', { class: 'pill blue' }, '수정한 조건 사용 중') : h('span', { class: 'pill gray' }, '기본 조건 사용 중'))),
         sevenCard(),
         D.seven.mode === 'preset' ? section('comps', '문장 성분 조건 목록', '"~가 있는 문장"처럼 학생이 문장에 넣어야 할 성분을 정해요.') : null,
         section('structs', '문장의 짜임 조건', '홑문장, 이어진문장, 안은문장 등 문장의 짜임을 정해요.'),
-        topics(),
+        section('grams', '문법 요소 조건', '종결·높임·시간·피동/사동·부정·인용 표현 조건이에요. [수업 설정]의 문제 유형을 "문법 요소형"이나 "섞어서"로 바꾸면 이 조건이 출제돼요.'),
+        topics('ad', '공익광고 주제', '체크한 주제만 학생에게 출제돼요. 이름을 눌러 바로 고칠 수 있어요.', '여러 주제를 한꺼번에 추가하려면 한 줄에 하나씩 붙여 넣으세요.\n예)\n시험 부정행위 근절\n학교 급식 잔반 줄이기'),
+        topics('daily', '일상 언어 상황', "말하는 상대와 장면이 드러나게 쓰면 높임·종결 표현을 연습하기 좋아요. 학생에게는 '일상 언어 상황'으로 보여요. [수업 설정]의 내용 범주에서 출제 여부를 정해요.", '여러 상황을 한꺼번에 추가하려면 한 줄에 하나씩 붙여 넣으세요.\n예)\n선생님께 면담 요청하기\n친구에게 생일 축하하기'),
         h('div', { class: 'toolbar' }, mkSave())].filter(Boolean));
       updateBar();
     }
@@ -964,17 +973,23 @@
     po.value = info.settings.poster === false ? '0' : '1';
     const tc = h('select', { id: 'tc' }, h('option', { value: '1' }, '주제 선택: 학생이 바꾸거나 직접 쓸 수 있게'), h('option', { value: '0' }, '주제 선택: 정해진 주제로 고정'));
     tc.value = info.settings.topicChoice === false ? '0' : '1';
+    const qt = h('select', { id: 'qt' }, h('option', { value: 'cs' }, '성분 + 짜임 (지금까지의 방식)'), h('option', { value: 'gram' }, '문법 요소형: 문법 요소 1개 + 성분 또는 짜임 1개'), h('option', { value: 'mixed' }, '두 유형을 섞어서'));
+    qt.value = info.settings.qType || 'cs';
+    const tcat = h('select', { id: 'tcat' }, h('option', { value: 'ad' }, '공익광고 주제'), h('option', { value: 'daily' }, '일상 언어 상황'), h('option', { value: 'mixed' }, '두 가지를 섞어서'));
+    tcat.value = info.settings.topicCat || 'ad';
     const saveClass = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
-      try { T.info = await api('/api/teacher/settings', { level: lv.value, revealAfter: parseInt(rv.value, 10), poster: po.value === '1', topicChoice: tc.value === '1' }, 'PUT'); toast('저장했어요.'); } catch (e) { toast(e.message, true); }
+      try { T.info = await api('/api/teacher/settings', { level: lv.value, revealAfter: parseInt(rv.value, 10), poster: po.value === '1', topicChoice: tc.value === '1', qType: qt.value, topicCat: tcat.value }, 'PUT'); toast('저장했어요.'); } catch (e) { toast(e.message, true); }
     } }, '저장');
     const classCard = h('section', { class: 'card' }, h('h2', null, '수업 설정'),
       h('div', { class: 'wrap', style: 'max-width:520px' },
         h('label', { class: 'field', for: 'lv' }, '문장의 짜임 난이도 (문장 성분 개수는 [조건 관리]에서 정해요)', lv),
         h('label', { class: 'field', for: 'rv' }, '예시 문장 공개', rv),
-        h('label', { class: 'field', for: 'tc' }, '공익광고 주제', tc),
+        h('label', { class: 'field', for: 'qt' }, '문제 유형 (모둠 활동 중에 바꾸면 새 문제가 나오니 수업 전에 정해 주세요)', qt),
+        h('label', { class: 'field', for: 'tcat' }, '내용 범주 (문장의 내용·소재)', tcat),
+        h('label', { class: 'field', for: 'tc' }, '주제·상황 선택', tc),
         h('label', { class: 'field', for: 'po' }, '포스터 프롬프트', po),
         h('div', null, saveClass),
-        h('p', { class: 'muted small' }, (info.counts.mode === 'seven' ? `문장 성분 ${info.counts.sevenPool}가지 중 ${info.counts.sevenMin === info.counts.sevenMax ? info.counts.sevenMin : info.counts.sevenMin + '~' + info.counts.sevenMax}개` : `문장 성분 조건 ${info.counts.comps}가지`) + `, 문장의 짜임 ${info.counts.structs}가지, 공익광고 주제 ${info.counts.topics}가지에서 학생마다 무작위로 뽑아요. (고치려면 [조건 관리] 탭)`)));
+        h('p', { class: 'muted small' }, (info.counts.mode === 'seven' ? `문장 성분 ${info.counts.sevenPool}가지 중 ${info.counts.sevenMin === info.counts.sevenMax ? info.counts.sevenMin : info.counts.sevenMin + '~' + info.counts.sevenMax}개` : `문장 성분 조건 ${info.counts.comps}가지`) + `, 문장의 짜임 ${info.counts.structs}가지, 문법 요소 ${info.counts.grams || 0}가지, 공익광고 주제 ${info.counts.topics}가지, 일상 언어 상황 ${info.counts.daily || 0}가지에서 학생마다 무작위로 뽑아요. (고치려면 [조건 관리] 탭)`)));
 
     const mode = h('select', { id: 'aimode' }, h('option', { value: 'on' }, 'AI가 문법을 판정하고, 선생님이 확인·수정'), h('option', { value: 'off' }, 'AI 없이 선생님이 직접 판정 (API 키·비용 필요 없음)'));
     mode.value = info.settings.aiMode === 'off' ? 'off' : 'on';
@@ -1151,14 +1166,15 @@
         });
       } else { c1 = sel('tc', conds.comps); }
       const compValue = () => sevenMode ? 'p:' + partBoxes.filter((x) => x.checked).map((x) => x.value).join('+') : c1.value;
-      const c2 = sel('ts', conds.structs), c3 = sel('tt', conds.topics);
+      const withNone = (s0, label) => { s0.insertBefore(h('option', { value: '' }, label), s0.firstChild); return s0; };
+      const c2 = sel('ts', conds.structs), c3 = sel('tt', conds.topics.map((o) => Object.assign({}, o, { label: (o.cat === 'daily' ? '[일상] ' : '[공익] ') + o.label }))), c4 = withNone(sel('tg', conds.grams || []), '(문법 요소 없음)');
       const sen = h('textarea', { id: 'tsen', rows: '3', placeholder: '조건에 맞춰 직접 쓴 문장을 입력해 보세요. (기록에는 남지 않아요)' });
       const out = h('div');
       const go = h('button', { class: 'btn primary', type: 'button' }, '판정해 보기');
       go.addEventListener('click', async () => {
         out.replaceChildren(h('p', { class: 'muted' }, '판정하는 중이에요…'));
         try {
-          const o = await api('/api/teacher/try', { comp: compValue(), struct: c2.value, topic: c3.value, sentence: sen.value });
+          const o = await api('/api/teacher/try', { comp: compValue(), struct: c2.value, gram: c4.value, topic: c3.value, sentence: sen.value });
           if (!o.ok) { out.replaceChildren(h('div', { class: 'notice bad' }, o.message)); return; }
           const r = o.result;
           const fails = Object.values(r.checks).filter((c) => !c.ok).map((c) => c.where);
@@ -1174,8 +1190,8 @@
       tryBox.replaceChildren(h('h2', null, '판정 시험해 보기'),
         h('p', { class: 'muted small', style: 'margin-bottom:12px' }, '수업 전에 AI가 어떻게 판정하는지 직접 확인해 보세요. 비용이 조금 들지만 학생 기록에는 남지 않아요.'),
         h('div', { class: 'wrap', style: 'max-width:640px' },
-          sevenMode ? h('div', { class: 'field' }, '문장 성분 조건 (체크한 성분이 모두 있어야 해요)', c1) : h('label', { class: 'field', for: 'tc' }, '문장 성분 조건', c1), h('label', { class: 'field', for: 'ts' }, '문장의 짜임 조건', c2),
-          h('label', { class: 'field', for: 'tt' }, '공익광고 주제 (AI는 판정하지 않고, 예시 문장을 만들 때만 참고해요)', c3), h('label', { class: 'field', for: 'tsen' }, '문장', sen), h('div', null, go), out));
+          sevenMode ? h('div', { class: 'field' }, '문장 성분 조건 (체크한 성분이 모두 있어야 해요)', c1) : h('label', { class: 'field', for: 'tc' }, '문장 성분 조건', c1), h('label', { class: 'field', for: 'ts' }, '문장의 짜임 조건', c2), h('label', { class: 'field', for: 'tg' }, '문법 요소 조건 (고르면 함께 판정해요)', c4),
+          h('label', { class: 'field', for: 'tt' }, '주제·상황 (AI는 판정하지 않고, 예시 문장을 만들 때만 참고해요)', c3), h('label', { class: 'field', for: 'tsen' }, '문장', sen), h('div', null, go), out));
     };
     api('/api/teacher/conditions').then(buildTry).catch((e) => tryBox.replaceChildren(h('div', { class: 'notice bad' }, e.message)));
 

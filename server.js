@@ -271,6 +271,9 @@ function mulberry(seed) {
 function hashStr(str) { let h = 2166136261; for (const ch of String(str)) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
 
 // 모둠 하나의 문제 목록. 반·모둠 번호·교사가 정한 '새로 뽑기' 값으로 항상 같은 결과가 나오게 만든다(서버가 여러 개여도 같은 목록).
+// 문제 유형(성분+짜임 / 문법 요소 / 섞기)과 내용 범주(공익광고 / 일상 언어 / 섞기) 설정
+function drawOpts() { return { qType: store.settings.qType || 'cs', topicCat: store.settings.topicCat || 'ad' }; }
+
 function groupSlots(cls, no, planIn) {
   const plan = planIn || store.settings.groupPlan || {};
   const structs = C.snapshot().structs;
@@ -278,10 +281,10 @@ function groupSlots(cls, no, planIn) {
   for (const sx of structs) for (let k = 0; k < (plan[sx.id] || 0); k++) picks.push(sx.id);
   const seed = Number(store.settings.groupSeed) || 1;
   const r = mulberry(hashStr(`${cls}|${no}|${seed}`));
-  const recent = { comps: [], structs: [], topics: [] };
+  const recent = { comps: [], structs: [], topics: [], grams: [] };
   return picks.map((structId, i) => {
-    const ids = C.draw(store.settings.level, r, { comps: recent.comps.slice(-3), structs: [], topics: recent.topics.slice(-3) }, '', structId);
-    recent.comps.push(ids.comp); recent.topics.push(ids.topic);
+    const ids = C.draw(store.settings.level, r, { comps: recent.comps.slice(-3), structs: [], topics: recent.topics.slice(-3), grams: recent.grams.slice(-3) }, '', structId, drawOpts());
+    recent.comps.push(ids.comp); recent.topics.push(ids.topic); if (ids.gram) recent.grams.push(ids.gram);
     return { i, n: `g${seed}.${hashStr(cls + '|' + no).toString(36)}.${i}`, ids };
   });
 }
@@ -317,7 +320,7 @@ function groupData(cls, no, rid) {
       const okRec = mine.filter((r) => finalVerdict(r) === 'correct').pop() || null;
       const pend = okRec ? null : mine.filter((r) => finalVerdict(r) === 'pending').pop() || null;
       const rec = okRec || pend || mine[mine.length - 1];
-      return { i, conds: null, tries: mine.length, status: okRec ? 'done' : pend ? 'pending' : 'todo', id: rec.id, sentence: rec.sentence, by: rec.name, topic: rec.topicLabel, comp: rec.compLabel, struct: rec.structLabel, padletAt: rec.padletAt || 0, poster: rec.poster || null, imgN: rec.imgN || 0, posterImg: rec.posterImg || null, roomDone: rec.roomDone || 0, notes: notesOf(`${cls}|${no}`, cid) };
+      return { i, conds: null, tries: mine.length, status: okRec ? 'done' : pend ? 'pending' : 'todo', id: rec.id, sentence: rec.sentence, by: rec.name, topic: rec.topicLabel, comp: rec.compLabel, struct: rec.structLabel, gram: rec.gramLabel || '', padletAt: rec.padletAt || 0, poster: rec.poster || null, imgN: rec.imgN || 0, posterImg: rec.posterImg || null, roomDone: rec.roomDone || 0, notes: notesOf(`${cls}|${no}`, cid) };
     });
     out.total = out.slots.length;
     out.done = out.slots.filter((x) => x.status === 'done').length;
@@ -335,7 +338,7 @@ function groupData(cls, no, rid) {
       i: sl.i, conds: view, tries: mine.length,
       status: okRec ? 'done' : pend ? 'pending' : 'todo',
       id: rec ? rec.id : '', sentence: rec ? rec.sentence : '', by: rec ? rec.name : '', topic: rec ? rec.topicLabel : (view ? view.topic.label : ''),
-      comp: res ? res.comp.label : '', struct: res ? res.struct.label : '', padletAt: rec ? rec.padletAt || 0 : 0,
+      comp: res ? res.comp.label : '', struct: res ? res.struct.label : '', gram: res && res.gram ? res.gram.label : '', padletAt: rec ? rec.padletAt || 0 : 0,
       poster: rec && rec.poster ? rec.poster : null, imgN: rec ? rec.imgN || 0 : 0, posterImg: rec ? rec.posterImg || null : null, roomDone: rec ? rec.roomDone || 0 : 0,
       notes: notesOf(`${cls}|${no}`, sl.n),
     };
@@ -355,7 +358,7 @@ function demoSlots() {
 function demoGroupView() {
   const slots = demoSlots().map((sl) => {
     const res = C.resolve(sl.ids), view = res ? C.publicView(res) : null;
-    return { i: sl.i, conds: view, tries: 0, status: 'todo', id: '', sentence: '', by: '', topic: view ? view.topic.label : '', comp: res ? res.comp.label : '', struct: res ? res.struct.label : '', padletAt: 0, poster: null, roomDone: 0, notes: [] };
+    return { i: sl.i, conds: view, tries: 0, status: 'todo', id: '', sentence: '', by: '', topic: view ? view.topic.label : '', comp: res ? res.comp.label : '', struct: res ? res.struct.label : '', gram: res && res.gram ? res.gram.label : '', padletAt: 0, poster: null, roomDone: 0, notes: [] };
   });
   return { demoId: 'g', count: 1, no: 1, members: [{ name: '나(체험)', me: true, leader: true }, { name: '모둠원 예시 1', me: false, leader: false }, { name: '모둠원 예시 2', me: false, leader: false }],
     slots, total: slots.length, done: 0, leader: { name: '나(체험)', me: true }, isLeader: true };
@@ -397,7 +400,7 @@ async function gboardData(cls, rid) {
       return { sid: m.sid, name: m.name, no: m.no, online, typing, draftLen: typing ? a.draftLen : 0, leader: !!ld && ld.sid === m.sid };
     });
     const state = d.total && d.done === d.total ? 'done' : (d.tries || d.done || d.pending) ? 'doing' : 'idle';
-    groups.push({ no, state, total: d.total, done: d.done, pending: d.pending, tries: d.tries, wrong: d.wrong, last: d.last, members, slots: d.slots.map((x) => ({ i: x.i, status: x.status, sentence: x.sentence, by: x.by, comp: x.comp, struct: x.struct, topic: x.topic, tries: x.tries, id: x.id, padletAt: x.padletAt, notes: x.notes || [] })) });
+    groups.push({ no, state, total: d.total, done: d.done, pending: d.pending, tries: d.tries, wrong: d.wrong, last: d.last, members, slots: d.slots.map((x) => ({ i: x.i, status: x.status, sentence: x.sentence, by: x.by, comp: x.comp, struct: x.struct, gram: x.gram || '', topic: x.topic, tries: x.tries, id: x.id, padletAt: x.padletAt, notes: x.notes || [] })) });
   }
   const unassigned = store.students.filter((x) => x.cls === cls && !store.groupOf(x.sid)).map((x) => ({ name: x.name, no: x.no, online: (presence.get(x.sid) || 0) > now - 5 * 60 * 1000 }));
   return { cls, groups, unassigned, count, planTotal: Object.values(store.settings.groupPlan || {}).reduce((a, b) => a + b, 0) };
@@ -425,22 +428,31 @@ function myHistory(st, limit) {
       verdict: finalVerdict(r), flagged: !!r.flagged, by: r.gk ? r.name : '', gno: r.gno || 0,
       tfeedback: r.tfeedback || '', tfeedbackAt: r.tfeedbackAt || 0, padletAt: r.padletAt || 0,
       poster: r.poster && r.poster.prompt ? { prompt: r.poster.prompt } : null, imgN: r.imgN || 0, posterImg: r.posterImg || null,
-      comp: r.compLabel, struct: r.structLabel, topic: r.topicLabel,
+      comp: r.compLabel, struct: r.structLabel, gram: r.gramLabel || '', topic: r.topicLabel,
     });
   }
   return out;
 }
 
+// 학생이 고를 수 있는 주제·상황 목록(선생님이 정한 내용 범주에 맞는 것)
+function topicChoices() {
+  const cat = store.settings.topicCat || 'ad';
+  const act = C.snapshot().topics.filter((x) => !x.off);
+  const pick = cat === 'daily' ? act.filter((x) => x.cat === 'daily') : cat === 'ad' ? act.filter((x) => x.cat !== 'daily') : act;
+  return pick.length ? pick : act;
+}
+function topicCatMap() { const m = {}; for (const x of topicChoices()) m[x.label] = x.cat === 'daily' ? 'daily' : 'ad'; return m; }
+
 function recentConditions(sid) {
-  const comps = [], structs = [], topics = [];
+  const comps = [], structs = [], topics = [], grams = [];
   const seen = new Set();
   for (let i = store.records.length - 1; i >= 0 && seen.size < 3; i--) {
     const r = store.records[i];
     if (r.sid !== sid || seen.has(r.cid)) continue;
     seen.add(r.cid);
-    comps.push(r.comp); structs.push(r.struct); topics.push(r.topic);
+    comps.push(r.comp); structs.push(r.struct); topics.push(r.topic); if (r.gram) grams.push(r.gram);
   }
-  return { comps, structs, topics };
+  return { comps, structs, topics, grams };
 }
 
 function teacherView(r) {
@@ -516,6 +528,7 @@ function teacherInfo() {
       aiMode: store.settings.aiMode === 'off' ? 'off' : 'on',
       poster: store.settings.poster !== false,
       topicChoice: store.settings.topicChoice !== false,
+      qType: store.settings.qType || 'cs', topicCat: store.settings.topicCat || 'ad',
       groupMode: groupOn(), groupCount: store.settings.groupCount || 8, groupPlan: store.settings.groupPlan || {},
       observerPassword: store.settings.observerPassword || '',
       observerClasses: store.settings.observerClasses || [],
@@ -700,7 +713,8 @@ async function handleApi(req, res, pathname, query) {
       poster: store.settings.poster !== false,
       imageGen: !!store.settings.imageGen && !!(store.settings.geminiApiKey || process.env.GEMINI_API_KEY), imageMax: store.settings.imageMax || 2,
       topicChoice: store.settings.topicChoice !== false,
-      topicList: store.settings.topicChoice !== false ? C.snapshot().topics.filter((x) => !x.off).map((x) => x.label) : [],
+      topicList: store.settings.topicChoice !== false ? topicChoices().map((x) => x.label) : [],
+      topicCats: store.settings.topicChoice !== false ? topicCatMap() : {},
       padletTemplate: store.settings.padletTemplate || '',
       padlet: st.demo ? { post: true, link: '', board: false, demo: true } : padletFor(st),
       group: groupView(st),
@@ -736,7 +750,7 @@ async function handleApi(req, res, pathname, query) {
       const sl = groupSlots(st.cls, store.groupOf(st.sid))[parseInt(b0.slot, 10)];
       if (!sl) throw new HttpError(400, '모둠 문제를 찾을 수 없어요. 화면을 새로고침해 주세요.');
       ids = sl.ids; cid = sl.n;
-    } else ids = C.draw(own || store.settings.level, rnd, recentConditions(st.sid), own === 'easy' ? 'min' : own === 'basic' ? 'max' : '');
+    } else ids = C.draw(own || store.settings.level, rnd, recentConditions(st.sid), own === 'easy' ? 'min' : own === 'basic' ? 'max' : '', '', drawOpts());
     const resolved = C.resolve(ids);
     const token = sign({ r: 'c', sid: st.sid, ids, n: cid || store.newId(), g: gk, rd: ar ? ar.id : '', exp: Date.now() + 4 * HOUR });
     if (!st.demo) activity.set(st.sid, { typingAt: 0, draftLen: 0, challengeAt: Date.now() });
@@ -744,7 +758,8 @@ async function handleApi(req, res, pathname, query) {
     return send(res, 200, {
       token, conditions: C.publicView(resolved),
       topicChoice: choice,
-      topicList: choice ? C.snapshot().topics.filter((x) => !x.off).map((x) => x.label) : [],
+      topicList: choice ? topicChoices().map((x) => x.label) : [],
+      topicCats: choice ? topicCatMap() : {},
     });
   }
 
@@ -822,9 +837,9 @@ async function handleApi(req, res, pathname, query) {
     if (rec.gk) requireLeader(st);
     if (rec.padletAt && !b.again) return send(res, 200, { ok: true, already: true, at: rec.padletAt });
     const gno = rec.gk ? store.groupOf(st.sid) : 0;
-    const gp = gno ? PosterLib.groupPadlet({ no: gno, names: groupMembers(st.cls, gno).map((x) => x.name), comp: rec.compLabel, struct: rec.structLabel, topic: rec.topicLabel, sentence: rec.sentence }) : null;
+    const gp = gno ? PosterLib.groupPadlet({ no: gno, names: groupMembers(st.cls, gno).map((x) => x.name), comp: rec.compLabel, struct: rec.structLabel, gram: rec.gramLabel || '', topic: rec.topicLabel, sentence: rec.sentence }) : null;
     const text = gp ? gp.body : PosterLib.fillTemplate(store.settings.padletTemplate, {
-      '이름': st.name, '학번': st.sid, '반': st.cls, '광고문구': rec.sentence, '성분조건': rec.compLabel, '짜임조건': rec.structLabel, '주제': rec.topicLabel,
+      '이름': st.name, '학번': st.sid, '반': st.cls, '광고문구': rec.sentence, '성분조건': rec.compLabel, '짜임조건': rec.structLabel, '문법요소': rec.gramLabel || '', '주제': rec.topicLabel,
     });
     const out = await PADLET.createPost({ key: store.settings.padletApiKey, boardId: cfg.boardId, section: room.section, subject: gp ? gp.subject : `${st.no ? st.no + '번 ' : ''}${st.name}`, body: text });
     if (!out.ok) {
@@ -897,7 +912,7 @@ async function handleApi(req, res, pathname, query) {
     imgBusy.add('p' + rec.id);
     try {
       const gno = rec.gk ? store.groupOf(st.sid) : 0;
-      const gp = gno ? PosterLib.groupPadlet({ no: gno, names: groupMembers(st.cls, gno).map((x) => x.name), comp: rec.compLabel, struct: rec.structLabel, topic: rec.topicLabel, sentence: rec.sentence }) : null;
+      const gp = gno ? PosterLib.groupPadlet({ no: gno, names: groupMembers(st.cls, gno).map((x) => x.name), comp: rec.compLabel, struct: rec.structLabel, gram: rec.gramLabel || '', topic: rec.topicLabel, sentence: rec.sentence }) : null;
       const t0 = Date.now(); store.patchRecord(rec.id, { imgDiag: { step: 'padlet-start', at: t0 } });
       const out = await PADLET.createPost({ key: store.settings.padletApiKey, boardId: cfg.boardId, section: room.section, subject: gp ? gp.subject : `${st.no ? st.no + '번 ' : ''}${st.name}`, body: gp ? gp.body : rec.sentence, imageUrl: pi.url });
       store.patchRecord(rec.id, { imgDiag: { step: 'padlet-done', ms: Date.now() - t0, ok: !!out.ok, status: out.status || 0, detail: String(out.detail || '').slice(0, 200), at: Date.now() } });
@@ -942,7 +957,8 @@ async function handleApi(req, res, pathname, query) {
     const topicText = C.snapshot().topics.some((x) => !x.off && x.label === wanted) ? wanted : '';  // 목록에 있는 주제만 인정
     const topicLabel = topicText || resolved.topic.label;
     const topicCustom = !!topicText && topicText !== resolved.topic.label;
-    const gradeInput = topicCustom ? Object.assign({}, resolved, { topic: { id: 'custom:' + topicText, label: topicText } }) : resolved;
+    const topicObj = topicText ? C.snapshot().topics.find((x) => x.label === topicText) : null;
+    const gradeInput = topicCustom ? Object.assign({}, resolved, { topic: { id: 'custom:' + topicText, label: topicText, cat: topicObj && topicObj.cat === 'daily' ? 'daily' : 'ad' } }) : resolved;
     const manual = !st.demo && store.settings.aiMode === 'off';
     const out = manual ? { ok: false, code: 'manual', message: '' } : await grader.grade(gradeInput, sentence);
     const fields = resultFields(out);
@@ -950,8 +966,8 @@ async function handleApi(req, res, pathname, query) {
     { const a = activity.get(st.sid); if (a) { a.typingAt = 0; a.draftLen = 0; } }
     const rec = st.demo ? { id: 'demo-' + ch.n + '-' + attempt } : store.addRecord(Object.assign({
       ts: Date.now(), sid: st.sid, name: st.name, cls: st.cls, cid: ch.n, attempt, rd: ar.id,
-      comp: ch.ids.comp, struct: ch.ids.struct, topic: ch.ids.topic,
-      compLabel: resolved.comp.label, structLabel: resolved.struct.label, topicLabel, topicCustom,
+      comp: ch.ids.comp, struct: ch.ids.struct, topic: ch.ids.topic, gram: ch.ids.gram || '',
+      compLabel: resolved.comp.label, structLabel: resolved.struct.label, gramLabel: resolved.gram ? resolved.gram.label : '', topicLabel, topicCustom,
       sentence, flagged: false,
     }, ch.g ? { gk: ch.g, gno: store.groupOf(st.sid) } : {}, fields));
 
@@ -1075,6 +1091,8 @@ async function handleApi(req, res, pathname, query) {
       if (b.aiMode !== undefined) patch.aiMode = b.aiMode === 'off' ? 'off' : 'on';
       if (b.poster !== undefined) patch.poster = !!b.poster;
       if (b.topicChoice !== undefined) patch.topicChoice = !!b.topicChoice;
+      if (b.qType !== undefined) patch.qType = b.qType;
+      if (b.topicCat !== undefined) patch.topicCat = b.topicCat;
       if (b.groupMode !== undefined) patch.groupMode = !!b.groupMode;
       if (b.groupCount !== undefined) patch.groupCount = parseInt(b.groupCount, 10);
       if (b.groupPlan && typeof b.groupPlan === 'object') patch.groupPlan = b.groupPlan;
@@ -1241,7 +1259,7 @@ async function handleApi(req, res, pathname, query) {
 
     if (method === 'POST' && pathname === '/api/teacher/try') {
       const b = await readBody(req, 4096);
-      const resolved = C.resolve({ comp: b.comp, struct: b.struct, topic: b.topic });
+      const resolved = C.resolve({ comp: b.comp || '-', struct: b.struct || '-', topic: b.topic, gram: b.gram || '' });
       if (!resolved) throw new HttpError(400, '조건을 선택해 주세요.');
       const sentence = String(b.sentence || '').replace(/\s+/g, ' ').trim();
       if (sentence.length < 2 || sentence.length > 200) throw new HttpError(400, '2~200자의 문장을 입력해 주세요.');
@@ -1252,7 +1270,7 @@ async function handleApi(req, res, pathname, query) {
     if (method === 'GET' && pathname === '/api/teacher/conditions') {
       const all = C.snapshot();
       const pub = (o) => ({ id: o.id, level: o.level, label: o.label, off: !!o.off });
-      return send(res, 200, { comps: all.comps.map(pub), structs: all.structs.map(pub), topics: all.topics.map(pub), seven: all.seven, parts: C.PARTS.map((x) => ({ id: x.id, name: x.name })) });
+      return send(res, 200, { comps: all.comps.map(pub), structs: all.structs.map(pub), grams: all.grams.map((o) => Object.assign(pub(o), { cat: o.cat })), topics: all.topics.map((o) => Object.assign(pub(o), { cat: o.cat })), seven: all.seven, parts: C.PARTS.map((x) => ({ id: x.id, name: x.name })) });
     }
 
     if (method === 'GET' && pathname === '/api/teacher/conditions/full') {
@@ -1419,9 +1437,10 @@ async function handleApi(req, res, pathname, query) {
       let ok = 0, fail = 0;
       let lastMessage = '';
       await Promise.all(targets.map(async (rec) => {
-        const resolved = C.resolve({ comp: rec.comp, struct: rec.struct, topic: rec.topic });
+        const resolved = C.resolve({ comp: rec.comp, struct: rec.struct, topic: rec.topic, gram: rec.gram || '' });
         if (!resolved) { fail++; return; }
-        const gin = rec.topicCustom && rec.topicLabel ? Object.assign({}, resolved, { topic: { id: 'custom:' + rec.topicLabel, label: rec.topicLabel } }) : resolved;
+        const tobj = rec.topicCustom && rec.topicLabel ? C.snapshot().topics.find((x) => x.label === rec.topicLabel) : null;
+        const gin = rec.topicCustom && rec.topicLabel ? Object.assign({}, resolved, { topic: { id: 'custom:' + rec.topicLabel, label: rec.topicLabel, cat: tobj && tobj.cat === 'daily' ? 'daily' : 'ad' } }) : resolved;
         const out = await grader.grade(gin, rec.sentence);
         if (out.ok) { store.patchRecord(rec.id, resultFields(out)); ok++; } else { fail++; lastMessage = out.message; }
       }));
@@ -1494,12 +1513,12 @@ async function handleApi(req, res, pathname, query) {
       const cls = query.get('cls') || '';
       const rdq = query.get('rd') || '';
       const rname = new Map(roundsList().map((x) => [x.id, x.name]));
-      const rows = [['활동 회차', '일시', '반', '학번', '이름', '모둠', '문장 성분 조건', '문장의 짜임 조건', '공익광고 주제', '시도 횟수', '제출 문장', '최종 판정', 'AI 판정', '교사 수정', '학생 확인 요청', 'AI 피드백 요약', '교사 피드백']];
+      const rows = [['활동 회차', '일시', '반', '학번', '이름', '모둠', '문장 성분 조건', '문장의 짜임 조건', '문법 요소 조건', '주제·상황', '시도 횟수', '제출 문장', '최종 판정', 'AI 판정', '교사 수정', '학생 확인 요청', 'AI 피드백 요약', '교사 피드백']];
       const label = { correct: '정답', incorrect: '오답', pending: '판정 대기' };
       for (const r of store.records) {
         if (r.ts < since || (cls && r.cls !== cls) || (rdq && recRound(r) !== rdq)) continue;
         const fb = r.checks ? Object.values(r.checks).filter((c) => !c.ok).map((c) => c.reason).join(' / ') : (r.pendingReason || '');
-        rows.push([rname.get(recRound(r)) || '', fmtTime(r.ts), r.cls, r.sid, r.name, r.gno || '', r.compLabel, r.structLabel, r.topicLabel, r.attempt, r.sentence,
+        rows.push([rname.get(recRound(r)) || '', fmtTime(r.ts), r.cls, r.sid, r.name, r.gno || '', r.compLabel, r.structLabel, r.gramLabel || '', r.topicLabel, r.attempt, r.sentence,
           label[finalVerdict(r)] || '', (r.manual ? 'AI 미사용' : label[r.verdict]) || '', r.override ? (label[r.override.verdict] + (r.override.note ? ': ' + r.override.note : '')) : '',
           r.flagged ? '예' : '', fb, r.tfeedback || '']);
       }
